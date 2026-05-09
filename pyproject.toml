@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "melo-v2-lms"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "supabase>=2.7",
+    "google-cloud-kms>=3.0",
+    "onvif-zeep-async>=0.2",
+    "numpy>=1.26",
+    "python-dotenv>=1.0",
+    "boto3>=1.35",
+    "ultralytics>=8.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+]
+
+[project.scripts]
+lms = "lms.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["lms"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
