@@ -30,6 +30,7 @@ class R2Uploader:
         secret_access_key: str,
         stream_id: str,
         segment_dir: Path,
+        privacy_filter=None,
     ) -> None:
         self._s3 = boto3.client(
             "s3",
@@ -45,6 +46,7 @@ class R2Uploader:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_upload_time: float = 0.0
+        self._privacy_filter = privacy_filter
 
     def start(self) -> None:
         self._stop_event.clear()
@@ -87,6 +89,20 @@ class R2Uploader:
 
             content_type = _CONTENT_TYPES[path.suffix]
             key = f"{self._prefix}/{path.name}"
+
+            if path.suffix == ".ts" and self._privacy_filter and self._privacy_filter.is_human_detected():
+                brb = self._privacy_filter.brb_segment
+                if brb:
+                    self._s3.put_object(
+                        Bucket=self._bucket,
+                        Key=key,
+                        Body=brb,
+                        ContentType=content_type,
+                    )
+                    self._uploaded.add(path.name)
+                    self._last_upload_time = time.time()
+                    logger.debug("Uploaded BRB segment in place of %s", path.name)
+                    continue
 
             self._s3.upload_file(
                 str(path),

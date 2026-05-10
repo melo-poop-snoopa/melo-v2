@@ -14,6 +14,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "boto3>=1.35",
     "ultralytics>=8.3",
+    "av>=12.0",
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]

@@ -31,6 +31,14 @@ class Config:
     # Heartbeat
     heartbeat_interval: int = 15
 
+    # Privacy filter
+    privacy_filter_enabled: bool = True
+    privacy_confidence_threshold: float = 0.5
+
+    # Thumbnail
+    thumbnail_interval: int = 30
+    r2_public_base: str = ""
+
     # General
     log_level: str = "INFO"
     local_dev: bool = False
@@ -72,6 +80,10 @@ def load_config() -> Config:
         hls_playlist_size=int(os.environ.get("HLS_PLAYLIST_SIZE", "5")),
         hls_output_dir=Path(os.environ.get("HLS_OUTPUT_DIR", "./segments")),
         heartbeat_interval=int(os.environ.get("HEARTBEAT_INTERVAL", "15")),
+        privacy_filter_enabled=os.environ.get("PRIVACY_FILTER_ENABLED", "true").lower() not in ("0", "false", "no"),
+        privacy_confidence_threshold=float(os.environ.get("PRIVACY_CONFIDENCE_THRESHOLD", "0.5")),
+        thumbnail_interval=int(os.environ.get("THUMBNAIL_INTERVAL", "30")),
+        r2_public_base=os.environ.get("R2_PUBLIC_BASE", ""),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         local_dev=os.environ.get("LOCAL_DEV", "").lower() in ("1", "true", "yes"),
     )

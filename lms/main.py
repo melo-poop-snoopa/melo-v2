@@ -1,25 +1,30 @@
 """
 Melo v2 LMS entry point.
 
-Connects cameras, starts HLS pipelines + R2 uploaders, and runs a heartbeat loop.
+Connects cameras, starts HLS pipelines, privacy filters, thumbnails, R2 uploaders,
+and delegates heartbeat + cleanup to dedicated manager threads.
 """
 from __future__ import annotations
 
 import logging
 import signal
 import threading
-import time
 from pathlib import Path
 
+import boto3
 from dotenv import load_dotenv
 
 from lms.config import load_config
 from lms.database import MeloDB
+from lms.heartbeat_manager import HeartbeatManager
 from lms.hls_pipeline import HLSPipeline
 from lms.kms import KMSClient
 from lms.onvif_client import get_stream_uri
+from lms.privacy_filter import PrivacyFilter
 from lms.r2_uploader import R2Uploader
 from lms.registry import Camera, CameraStatus, registry
+from lms.segment_cleanup import SegmentCleanup
+from lms.thumbnail_capture import ThumbnailCapture
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +46,23 @@ def main() -> None:
             cfg.gcp_project_id, cfg.kms_location, cfg.kms_key_ring, cfg.kms_key_name
         )
 
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=cfg.r2_endpoint,
+        aws_access_key_id=cfg.r2_access_key_id,
+        aws_secret_access_key=cfg.r2_secret_access_key,
+    )
+
     cameras = db.get_cameras_for_shelter(cfg.shelter_id)
     logger.info("Found %d camera(s) for shelter %s", len(cameras), cfg.shelter_id)
 
+    heartbeat = HeartbeatManager(db, interval=cfg.heartbeat_interval)
+    cleanup = SegmentCleanup()
+
     pipelines: list[HLSPipeline] = []
     uploaders: list[R2Uploader] = []
+    privacy_filters: list[PrivacyFilter] = []
+    thumbnails: list[ThumbnailCapture] = []
     stream_ids: list[str] = []
 
     for cam_row in cameras:
@@ -87,6 +104,20 @@ def main() -> None:
         ))
 
         output_dir = cfg.hls_output_dir / stream_id
+        cleanup.register(output_dir)
+
+        # Privacy filter (optional — disabled if model fails to load)
+        privacy_filter: PrivacyFilter | None = None
+        if cfg.privacy_filter_enabled:
+            privacy_filter = PrivacyFilter(
+                stream_id=stream_id,
+                rtsp_url=rtsp_url,
+                confidence_threshold=cfg.privacy_confidence_threshold,
+                segment_duration=cfg.hls_segment_duration,
+            )
+            privacy_filter.start()
+            privacy_filters.append(privacy_filter)
+
         pipeline = HLSPipeline(
             stream_id=stream_id,
             rtsp_url=rtsp_url,
@@ -101,37 +132,52 @@ def main() -> None:
             secret_access_key=cfg.r2_secret_access_key,
             stream_id=stream_id,
             segment_dir=output_dir,
+            privacy_filter=privacy_filter,
         )
 
         pipeline.start()
         uploader.start()
         db.set_stream_status(stream_id, "live")
 
+        heartbeat.register(stream_id, pipeline, uploader)
+
+        if cfg.r2_public_base:
+            thumb = ThumbnailCapture(
+                stream_id=stream_id,
+                rtsp_url=rtsp_url,
+                db=db,
+                s3_client=s3,
+                bucket=cfg.r2_bucket,
+                r2_public_base=cfg.r2_public_base,
+                privacy_filter=privacy_filter,
+                interval=cfg.thumbnail_interval,
+            )
+            thumb.start()
+            thumbnails.append(thumb)
+
         pipelines.append(pipeline)
         uploaders.append(uploader)
         stream_ids.append(stream_id)
 
-    # Heartbeat loop
+    heartbeat.start()
+    cleanup.start()
+
+    # Block until signal
     stop = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
 
     logger.info("LMS running — %d pipeline(s) active", len(pipelines))
-
-    while not stop.is_set():
-        for pipeline, uploader, sid in zip(pipelines, uploaders, stream_ids):
-            alive = pipeline.is_alive()
-            recent_upload = (time.time() - uploader.last_upload_time) < 30
-
-            if alive and recent_upload:
-                db.update_heartbeat(sid)
-            else:
-                db.set_stream_status(sid, "offline")
-
-        stop.wait(cfg.heartbeat_interval)
+    stop.wait()
 
     # Graceful shutdown
     logger.info("Shutting down...")
+    heartbeat.stop()
+    cleanup.stop()
+    for pf in privacy_filters:
+        pf.stop()
+    for thumb in thumbnails:
+        thumb.stop()
     for pipeline in pipelines:
         pipeline.stop()
     for uploader in uploaders:

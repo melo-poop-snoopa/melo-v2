@@ -60,6 +60,11 @@ class MeloDB:
         ).eq("id", stream_id).execute()
         logger.info("Stream %s → %s", stream_id, status)
 
+    def update_thumbnail_url(self, stream_id: str, url: str) -> None:
+        self._client.table("streams").update(
+            {"thumbnail_url": url}
+        ).eq("id", stream_id).execute()
+
     # ── Cats ──────────────────────────────────────────────────────────────────
 
     def get_cats_for_stream(self, stream_id: str) -> list[dict]:
