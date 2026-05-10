@@ -63,16 +63,20 @@ def main() -> None:
             logger.warning("No encrypted secret for camera %s, skipping", cam_uuid)
             continue
 
-        # Get RTSP URI via ONVIF
-        try:
-            rtsp_url = get_stream_uri(
-                cam_row["ip_address"], cam_row.get("onvif_port", 80), username, password
-            )
-        except Exception:
-            logger.exception("ONVIF failed for camera %s", cam_uuid)
-            continue
-        finally:
+        # Use explicit rtsp_url if set, otherwise discover via ONVIF
+        if cam_row.get("rtsp_url"):
+            rtsp_url = cam_row["rtsp_url"]
             del password
+        else:
+            try:
+                rtsp_url = get_stream_uri(
+                    cam_row["ip_address"], cam_row.get("onvif_port", 80), username, password
+                )
+            except Exception:
+                logger.exception("ONVIF failed for camera %s", cam_uuid)
+                continue
+            finally:
+                del password
 
         registry.upsert(Camera(
             uuid=cam_uuid,
