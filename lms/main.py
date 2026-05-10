@@ -137,7 +137,16 @@ def main() -> None:
 
         pipeline.start()
         uploader.start()
+
+        # Build HLS URL from R2 public base if configured
+        hls_url: str | None = None
+        if cfg.r2_public_base:
+            hls_url = f"{cfg.r2_public_base.rstrip('/')}/live-segments/{stream_id}/stream.m3u8"
+
         db.set_stream_status(stream_id, "live")
+        if hls_url:
+            from supabase import Client
+            db.client.table("streams").update({"hls_url": hls_url}).eq("id", stream_id).execute()
 
         heartbeat.register(stream_id, pipeline, uploader)
 

@@ -101,17 +101,38 @@ class HLSPipeline:
         )
 
     def _watchdog(self) -> None:
+        from lms.reconnect import reconnect_with_backoff
+
         while not self._stop_event.is_set():
             if self._process:
                 self._process.wait()
             if self._stop_event.is_set():
                 break
+
+            rc = self._process.returncode if self._process else "?"
             logger.warning(
-                "FFmpeg exited unexpectedly for stream %s (rc=%s), restarting in %.0fs",
-                self._stream_id,
-                self._process.returncode if self._process else "?",
-                _RESTART_DELAY,
+                "FFmpeg exited for stream %s (rc=%s) — reconnecting",
+                self._stream_id, rc,
             )
-            self._stop_event.wait(_RESTART_DELAY)
-            if not self._stop_event.is_set():
-                self._spawn()
+
+            reconnect_with_backoff(
+                stream_id=self._stream_id,
+                attempt_fn=self._try_restart,
+                stop_fn=self._stop_event.is_set,
+                on_failure=lambda: logger.error(
+                    "Stream %s: permanent reconnect failure", self._stream_id
+                ),
+            )
+
+    def _try_restart(self) -> bool:
+        try:
+            self._spawn()
+            # Give FFmpeg 2s to either connect or immediately fail
+            try:
+                self._process.wait(timeout=2)
+                return False  # exited quickly — retry
+            except subprocess.TimeoutExpired:
+                return True   # still running — success
+        except Exception:
+            logger.exception("Restart failed for stream %s", self._stream_id)
+            return False

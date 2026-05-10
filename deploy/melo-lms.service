@@ -1,0 +1,22 @@
+[Unit]
+Description=Melo LMS — Cat Live Streaming Media Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=melo
+WorkingDirectory=/opt/melo
+EnvironmentFile=/opt/melo/.env
+ExecStart=/root/.local/bin/uv run lms
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Logging via journald (use: journalctl -u melo-lms -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=melo-lms
+
+[Install]
+WantedBy=multi-user.target

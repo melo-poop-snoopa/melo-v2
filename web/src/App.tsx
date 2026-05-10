@@ -1,41 +1,51 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom"
+import { useEffect } from "react"
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
+import { useAuthStore } from "@/store/auth-store"
+import { AuthGuard } from "@/components/admin/AuthGuard"
+import { AdminLayout } from "@/components/admin/AdminLayout"
+import Landing from "@/pages/Landing"
+import ShelterPage from "@/pages/ShelterPage"
+import LoginPage from "@/pages/admin/LoginPage"
+import ProfilePage from "@/pages/admin/ProfilePage"
+import CatsPage from "@/pages/admin/CatsPage"
+import StreamsPage from "@/pages/admin/StreamsPage"
 
-function Landing() {
+function AppRoutes() {
+  const { init } = useAuthStore()
+
+  useEffect(() => {
+    init()
+  }, [])
+
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <h1 className="text-4xl font-display font-bold text-melo-500">
-        melo — live cat streams
-      </h1>
-    </div>
+    <Routes>
+      {/* Public */}
+      <Route path="/" element={<Landing />} />
+      <Route path="/shelter/:id" element={<ShelterPage />} />
+
+      {/* Admin */}
+      <Route path="/app/login" element={<LoginPage />} />
+      <Route
+        path="/app"
+        element={
+          <AuthGuard>
+            <AdminLayout />
+          </AuthGuard>
+        }
+      >
+        <Route index element={<Navigate to="/app/profile" replace />} />
+        <Route path="profile" element={<ProfilePage />} />
+        <Route path="cats" element={<CatsPage />} />
+        <Route path="streams" element={<StreamsPage />} />
+      </Route>
+    </Routes>
   )
 }
 
-function ShelterPage() {
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <h1 className="text-2xl font-display">Shelter Page (placeholder)</h1>
-    </div>
-  )
-}
-
-function Dashboard() {
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <h1 className="text-2xl font-display">Shelter Admin Dashboard (placeholder)</h1>
-    </div>
-  )
-}
-
-function App() {
+export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/shelter/:id" element={<ShelterPage />} />
-        <Route path="/dashboard/*" element={<Dashboard />} />
-      </Routes>
+      <AppRoutes />
     </BrowserRouter>
   )
 }
-
-export default App
