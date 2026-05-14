@@ -110,8 +110,6 @@ def main() -> None:
     stop = threading.Event()
 
     def _shutdown(*_):
-        for pipeline in pipelines:
-            pipeline.request_stop()
         stop.set()
 
     signal.signal(signal.SIGINT, _shutdown)
