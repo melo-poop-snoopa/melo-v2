@@ -51,7 +51,7 @@ class MeloDB:
 
     def update_heartbeat(self, stream_id: str) -> None:
         self._client.table("streams").update(
-            {"last_heartbeat": datetime.now(timezone.utc).isoformat()}
+            {"last_heartbeat": datetime.now(timezone.utc).isoformat(), "status": "live"}
         ).eq("id", stream_id).execute()
 
     def set_stream_status(self, stream_id: str, status: str) -> None:
