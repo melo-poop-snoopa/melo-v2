@@ -122,6 +122,7 @@ class R2Uploader:
 
             if path.suffix == ".ts":
                 self._uploaded.add(path.name)
+                logger.info("Uploaded %s → %s", path.name, key)
 
             self._last_upload_time = time.time()
 

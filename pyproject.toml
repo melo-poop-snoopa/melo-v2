@@ -16,6 +16,8 @@ dependencies = [
     "ultralytics>=8.3",
     "av>=12.0",
     "Pillow>=10.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
 ]
 
 [project.optional-dependencies]
@@ -26,9 +28,10 @@ dev = [
 
 [project.scripts]
 lms = "lms.main:main"
+melo-setup = "setup.app:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["lms"]
+packages = ["lms", "setup"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

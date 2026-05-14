@@ -49,3 +49,23 @@ export const AGE_BRACKET_COLORS: Record<Cat["age_bracket"], string> = {
 }
 
 export const HEARTBEAT_STALE_MS = 45_000
+
+export interface ShelterCamera {
+  id: string
+  shelter_id: string
+  stream_id: string | null
+  ip_address: string
+  onvif_port: number
+  username: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DiscoveredCamera {
+  host: string
+  port: number
+  xaddrs: string
+  device_uuid: string | null
+}
+
+export type DiscoveryStep = "scan" | "credentials" | "testing" | "results"
