@@ -1,6 +1,16 @@
 -- Melo v2: Cat live streaming platform tables
 -- shelters, streams, cats, shelter_cameras
 
+-- ─── Helpers ────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION _set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$;
+
 -- ─── Enums ──────────────────────────────────────────────────────────────────
 
 CREATE TYPE shelter_verification_status AS ENUM ('unverified', 'verified');

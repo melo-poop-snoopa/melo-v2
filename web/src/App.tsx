@@ -9,6 +9,7 @@ import LoginPage from "@/pages/admin/LoginPage"
 import ProfilePage from "@/pages/admin/ProfilePage"
 import CatsPage from "@/pages/admin/CatsPage"
 import StreamsPage from "@/pages/admin/StreamsPage"
+import CamerasPage from "@/pages/admin/CamerasPage"
 
 function AppRoutes() {
   const { init } = useAuthStore()
@@ -37,6 +38,7 @@ function AppRoutes() {
         <Route path="profile" element={<ProfilePage />} />
         <Route path="cats" element={<CatsPage />} />
         <Route path="streams" element={<StreamsPage />} />
+        <Route path="cameras" element={<CamerasPage />} />
       </Route>
     </Routes>
   )

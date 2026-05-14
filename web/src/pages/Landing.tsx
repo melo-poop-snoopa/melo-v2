@@ -30,7 +30,7 @@ export default function Landing() {
       <header className="sticky top-0 z-40 flex items-center justify-between border-b border-white/10 bg-background/80 px-6 py-4 backdrop-blur">
         <span className="font-display text-xl font-bold text-melo-500">melo</span>
         <a
-          href="/app/index.html"
+          href="/app/login"
           className="rounded-lg border border-white/20 px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           Shelter login

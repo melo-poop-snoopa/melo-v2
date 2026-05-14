@@ -26,6 +26,12 @@ class MeloDB:
         rows = result.data
         return rows[0] if rows else None
 
+    def set_lms_url(self, shelter_id: str, lms_url: str) -> None:
+        self._client.table("shelters").update(
+            {"lms_url": lms_url}
+        ).eq("id", shelter_id).execute()
+        logger.info("Registered LMS URL for shelter %s: %s", shelter_id, lms_url)
+
     # ── Cameras ───────────────────────────────────────────────────────────────
 
     def get_cameras_for_shelter(self, shelter_id: str) -> list[dict]:
