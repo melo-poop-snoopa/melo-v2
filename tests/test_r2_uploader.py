@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import botocore.exceptions
 import pytest
 
 from lms.r2_uploader import R2Uploader
@@ -119,9 +120,53 @@ def test_content_type_m3u8(
 def test_last_upload_time_updated(
     uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
 ) -> None:
-    assert uploader.last_upload_time == 0.0
+    initial_time = uploader.last_upload_time
+    assert initial_time > 0
 
     (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
     uploader._upload_new_files()
 
-    assert uploader.last_upload_time > 0
+    assert uploader.last_upload_time > initial_time
+
+
+def test_upload_skips_vanished_file(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """File deleted between iterdir() and upload_file() should not crash."""
+    seg = tmp_segments / "seg_00001.ts"
+    seg.write_bytes(b"\x00" * 100)
+
+    def delete_then_raise(*args, **kwargs):
+        seg.unlink(missing_ok=True)
+        raise FileNotFoundError(str(seg))
+
+    mock_s3_client.upload_file.side_effect = delete_then_raise
+
+    uploader._upload_new_files()  # should not raise
+
+
+def test_upload_handles_unseekable_stream_error(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """boto3 wraps FileNotFoundError as UnseekableStreamError during retries."""
+    seg = tmp_segments / "seg_00001.ts"
+    seg.write_bytes(b"\x00" * 100)
+
+    mock_s3_client.upload_file.side_effect = botocore.exceptions.UnseekableStreamError(
+        stream_object="fake-stream"
+    )
+
+    uploader._upload_new_files()  # should not raise
+
+
+def test_upload_skips_file_deleted_before_upload(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """File gone before upload_file() is called — caught by exists() check."""
+    seg = tmp_segments / "seg_00001.ts"
+    seg.write_bytes(b"\x00" * 100)
+    seg.unlink()
+
+    uploader._upload_new_files()
+
+    mock_s3_client.upload_file.assert_not_called()
