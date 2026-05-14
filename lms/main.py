@@ -171,8 +171,14 @@ def main() -> None:
 
     # Block until signal
     stop = threading.Event()
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+
+    def _shutdown(*_):
+        for pipeline in pipelines:
+            pipeline.request_stop()
+        stop.set()
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
 
     logger.info("LMS running — %d pipeline(s) active", len(pipelines))
     stop.wait()
