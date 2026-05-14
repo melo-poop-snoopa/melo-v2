@@ -46,10 +46,14 @@ class R2Uploader:
         self._uploaded: set[str] = set()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._last_upload_time: float = time.time()
+        self._last_upload_time: float = 0.0
+        self._upload_count: int = 0
         self._privacy_filter = privacy_filter
 
     def start(self) -> None:
+        self._clear_remote()
+        self._uploaded.clear()
+        self._upload_count = 0
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._upload_loop, daemon=True, name=f"r2-upload-{self._stream_id}"
@@ -67,6 +71,20 @@ class R2Uploader:
     def last_upload_time(self) -> float:
         return self._last_upload_time
 
+    @property
+    def upload_count(self) -> int:
+        return self._upload_count
+
+    def _clear_remote(self) -> None:
+        try:
+            resp = self._s3.list_objects_v2(Bucket=self._bucket, Prefix=f"{self._prefix}/")
+            objects = [{"Key": obj["Key"]} for obj in resp.get("Contents", [])]
+            if objects:
+                self._s3.delete_objects(Bucket=self._bucket, Delete={"Objects": objects})
+                logger.info("Cleared %d stale R2 objects for stream %s", len(objects), self._stream_id)
+        except Exception:
+            logger.exception("Failed to clear remote segments for stream %s", self._stream_id)
+
     def _upload_loop(self) -> None:
         while not self._stop_event.is_set():
             try:
@@ -80,51 +98,65 @@ class R2Uploader:
         if not self._segment_dir.exists():
             return
 
+        segments: list[Path] = []
+        playlists: list[Path] = []
         for path in self._segment_dir.iterdir():
-            if path.suffix not in _CONTENT_TYPES:
-                continue
+            if path.suffix == ".ts" and path.name not in self._uploaded:
+                segments.append(path)
+            elif path.suffix == ".m3u8":
+                playlists.append(path)
 
-            # .m3u8 playlist changes every cycle — always re-upload
-            if path.suffix == ".ts" and path.name in self._uploaded:
-                continue
+        for path in segments:
+            self._upload_segment(path)
 
-            content_type = _CONTENT_TYPES[path.suffix]
-            key = f"{self._prefix}/{path.name}"
+        for path in playlists:
+            self._put_file(path)
 
-            if path.suffix == ".ts" and self._privacy_filter and self._privacy_filter.is_human_detected():
-                brb = self._privacy_filter.brb_segment
-                if brb:
-                    self._s3.put_object(
-                        Bucket=self._bucket,
-                        Key=key,
-                        Body=brb,
-                        ContentType=content_type,
-                    )
-                    self._uploaded.add(path.name)
-                    self._last_upload_time = time.time()
-                    logger.debug("Uploaded BRB segment in place of %s", path.name)
-                    continue
+    def _upload_segment(self, path: Path) -> None:
+        content_type = _CONTENT_TYPES[".ts"]
+        key = f"{self._prefix}/{path.name}"
 
-            if not path.exists():
-                logger.debug("Segment %s vanished before upload", path.name)
-                continue
-
-            try:
-                self._s3.upload_file(
-                    str(path),
-                    self._bucket,
-                    key,
-                    ExtraArgs={"ContentType": content_type},
+        if self._privacy_filter and self._privacy_filter.is_human_detected():
+            brb = self._privacy_filter.brb_segment
+            if brb:
+                self._s3.put_object(
+                    Bucket=self._bucket,
+                    Key=key,
+                    Body=brb,
+                    ContentType=content_type,
                 )
-            except (FileNotFoundError, OSError, botocore.exceptions.UnseekableStreamError):
-                logger.debug("Segment %s vanished during upload", path.name)
-                continue
-
-            if path.suffix == ".ts":
                 self._uploaded.add(path.name)
-                logger.info("Uploaded %s → %s", path.name, key)
+                self._upload_count += 1
+                self._last_upload_time = time.time()
+                logger.debug("Uploaded BRB segment in place of %s", path.name)
+                return
 
-            self._last_upload_time = time.time()
+        if not self._put_file(path):
+            return
+        self._uploaded.add(path.name)
+        self._upload_count += 1
+        self._last_upload_time = time.time()
+        logger.info("Uploaded %s → %s", path.name, key)
+
+    def _put_file(self, path: Path) -> bool:
+        if not path.exists():
+            logger.debug("File %s vanished before upload", path.name)
+            return False
+
+        content_type = _CONTENT_TYPES[path.suffix]
+        key = f"{self._prefix}/{path.name}"
+
+        try:
+            self._s3.upload_file(
+                str(path),
+                self._bucket,
+                key,
+                ExtraArgs={"ContentType": content_type},
+            )
+            return True
+        except (FileNotFoundError, OSError, botocore.exceptions.UnseekableStreamError):
+            logger.debug("File %s vanished during upload", path.name)
+            return False
 
     def _cleanup_old_segments(self) -> None:
         if not self._segment_dir.exists():
@@ -139,3 +171,4 @@ class R2Uploader:
             if stale:
                 path.unlink(missing_ok=True)
                 self._uploaded.discard(path.name)
+                logger.info("Deleted stale local segment %s", path.name)

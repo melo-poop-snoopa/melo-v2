@@ -21,14 +21,20 @@ class HLSPipeline:
         stream_id: str,
         rtsp_url: str,
         output_dir: Path,
-        segment_duration: int = 4,
+        segment_duration: int = 2,
         playlist_size: int = 5,
+        video_codec: str = "libx264",
+        preset: str = "ultrafast",
+        fps: int = 30,
     ) -> None:
         self._stream_id = stream_id
         self._rtsp_url = rtsp_url
         self._output_dir = output_dir
         self._segment_duration = segment_duration
         self._playlist_size = playlist_size
+        self._video_codec = video_codec
+        self._preset = preset
+        self._fps = fps
         self._process: subprocess.Popen[bytes] | None = None
         self._stop_event = threading.Event()
         self._watchdog_thread: threading.Thread | None = None
@@ -38,6 +44,9 @@ class HLSPipeline:
             return
 
         self._output_dir.mkdir(parents=True, exist_ok=True)
+        for stale in self._output_dir.iterdir():
+            if stale.suffix in (".ts", ".m3u8"):
+                stale.unlink(missing_ok=True)
         self._stop_event.clear()
         self._spawn()
 
@@ -81,16 +90,24 @@ class HLSPipeline:
         segment_pattern = str(self._output_dir / "seg_%05d.ts")
         playlist_path = str(self._output_dir / "stream.m3u8")
 
+        gop_size = self._segment_duration * self._fps
+
         return [
             ffmpeg,
+            "-fflags", "nobuffer",
+            "-flags", "low_delay",
             "-rtsp_transport", "tcp",
             "-i", self._rtsp_url,
-            "-c:v", "copy",
+            "-c:v", self._video_codec,
+            "-preset", self._preset,
+            "-tune", "zerolatency",
+            "-g", str(gop_size),
+            "-sc_threshold", "0",
             "-an",
             "-f", "hls",
             "-hls_time", str(self._segment_duration),
             "-hls_list_size", str(self._playlist_size),
-            "-hls_flags", "delete_segments+append_list",
+            "-hls_flags", "delete_segments+split_by_time",
             "-hls_segment_filename", segment_pattern,
             playlist_path,
         ]
@@ -100,7 +117,7 @@ class HLSPipeline:
         self._process = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
 
     def _watchdog(self) -> None:
