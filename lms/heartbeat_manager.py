@@ -18,6 +18,7 @@ from lms.r2_uploader import R2Uploader
 logger = logging.getLogger(__name__)
 
 _UPLOAD_STALE_THRESHOLD = 30  # seconds
+_MIN_SEGMENTS_FOR_LIVE = 2
 
 
 class HeartbeatManager:
@@ -56,12 +57,13 @@ class HeartbeatManager:
     def _tick(self, stream_id: str, pipeline: HLSPipeline, uploader: R2Uploader) -> None:
         alive = pipeline.is_alive()
         recent_upload = (time.time() - uploader.last_upload_time) < _UPLOAD_STALE_THRESHOLD
+        enough_segments = uploader.upload_count >= _MIN_SEGMENTS_FOR_LIVE
 
-        if alive and recent_upload:
+        if alive and recent_upload and enough_segments:
             self._db.update_heartbeat(stream_id)
         else:
             logger.warning(
-                "Stream %s unhealthy (alive=%s recent_upload=%s) → offline",
-                stream_id, alive, recent_upload,
+                "Stream %s unhealthy (alive=%s recent_upload=%s segments=%d) → offline",
+                stream_id, alive, recent_upload, uploader.upload_count,
             )
             self._db.set_stream_status(stream_id, "offline")

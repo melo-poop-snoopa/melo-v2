@@ -96,6 +96,9 @@ class PipelineManager:
             output_dir=output_dir,
             segment_duration=cfg.hls_segment_duration,
             playlist_size=cfg.hls_playlist_size,
+            video_codec=cfg.hls_video_codec,
+            preset=cfg.hls_preset,
+            fps=cfg.hls_fps,
         )
         uploader = R2Uploader(
             bucket=cfg.r2_bucket,
