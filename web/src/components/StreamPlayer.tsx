@@ -20,7 +20,11 @@ export function StreamPlayer({ stream, className }: StreamPlayerProps) {
     if (!video || !isLive || !stream.hls_url) return
 
     if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: false })
+      const hls = new Hls({
+        enableWorker: false,
+        manifestLoadingMaxRetry: 6,
+        manifestLoadingRetryDelay: 2000,
+      })
       hlsRef.current = hls
       hls.loadSource(stream.hls_url)
       hls.attachMedia(video)

@@ -47,6 +47,9 @@ class HLSPipeline:
         self._watchdog_thread.start()
         logger.info("HLS pipeline started for stream %s", self._stream_id)
 
+    def request_stop(self) -> None:
+        self._stop_event.set()
+
     def stop(self) -> None:
         self._stop_event.set()
         if self._process and self._process.poll() is None:

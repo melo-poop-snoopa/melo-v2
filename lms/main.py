@@ -143,9 +143,7 @@ def main() -> None:
         if cfg.r2_public_base:
             hls_url = f"{cfg.r2_public_base.rstrip('/')}/live-segments/{stream_id}/stream.m3u8"
 
-        db.set_stream_status(stream_id, "live")
         if hls_url:
-            from supabase import Client
             db.client.table("streams").update({"hls_url": hls_url}).eq("id", stream_id).execute()
 
         heartbeat.register(stream_id, pipeline, uploader)
@@ -173,8 +171,14 @@ def main() -> None:
 
     # Block until signal
     stop = threading.Event()
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+
+    def _shutdown(*_):
+        for pipeline in pipelines:
+            pipeline.request_stop()
+        stop.set()
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
 
     logger.info("LMS running — %d pipeline(s) active", len(pipelines))
     stop.wait()

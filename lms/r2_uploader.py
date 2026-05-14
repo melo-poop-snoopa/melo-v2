@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import boto3
+import botocore.exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class R2Uploader:
         self._uploaded: set[str] = set()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._last_upload_time: float = 0.0
+        self._last_upload_time: float = time.time()
         self._privacy_filter = privacy_filter
 
     def start(self) -> None:
@@ -104,12 +105,20 @@ class R2Uploader:
                     logger.debug("Uploaded BRB segment in place of %s", path.name)
                     continue
 
-            self._s3.upload_file(
-                str(path),
-                self._bucket,
-                key,
-                ExtraArgs={"ContentType": content_type},
-            )
+            if not path.exists():
+                logger.debug("Segment %s vanished before upload", path.name)
+                continue
+
+            try:
+                self._s3.upload_file(
+                    str(path),
+                    self._bucket,
+                    key,
+                    ExtraArgs={"ContentType": content_type},
+                )
+            except (FileNotFoundError, OSError, botocore.exceptions.UnseekableStreamError):
+                logger.debug("Segment %s vanished during upload", path.name)
+                continue
 
             if path.suffix == ".ts":
                 self._uploaded.add(path.name)
@@ -122,6 +131,10 @@ class R2Uploader:
 
         now = time.time()
         for path in self._segment_dir.iterdir():
-            if path.suffix == ".ts" and (now - path.stat().st_mtime) > _CLEANUP_AGE:
+            try:
+                stale = path.suffix == ".ts" and (now - path.stat().st_mtime) > _CLEANUP_AGE
+            except FileNotFoundError:
+                continue
+            if stale:
                 path.unlink(missing_ok=True)
                 self._uploaded.discard(path.name)

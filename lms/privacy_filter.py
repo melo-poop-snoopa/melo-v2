@@ -169,20 +169,21 @@ def _encode_brb_segment(segment_duration: int) -> bytes | None:
 
 def _generate_brb_png(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "lavfi",
-        "-i", "color=c=0x1a1a2e:size=1280x720:rate=1",
-        "-vf", (
-            "drawtext=text='Be Right Back':"
-            "fontcolor=white:fontsize=72:"
-            "x=(w-text_w)/2:y=(h-text_h)/2"
-        ),
-        "-frames:v", "1",
-        str(path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, timeout=15)
-    if result.returncode != 0:
-        logger.warning("Could not generate brb.png: %s", result.stderr.decode())
-    else:
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        img = Image.new("RGB", (1280, 720), color=(0x1A, 0x1A, 0x2E))
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.load_default(size=72)
+        except TypeError:
+            font = ImageFont.load_default()
+        text = "Be Right Back"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        x = (1280 - (bbox[2] - bbox[0])) // 2
+        y = (720 - (bbox[3] - bbox[1])) // 2
+        draw.text((x, y), text, fill="white", font=font)
+        img.save(path)
         logger.info("Generated brb.png at %s", path)
+    except Exception:
+        logger.warning("Could not generate brb.png", exc_info=True)
