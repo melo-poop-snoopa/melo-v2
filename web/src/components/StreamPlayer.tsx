@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import Hls from "hls.js"
+import { DotLottieReact } from "@lottiefiles/dotlottie-react"
 import { cn } from "@/lib/utils"
 import type { Stream } from "@/types"
 import { useStreamStatus } from "@/hooks/use-stream-status"
@@ -128,10 +129,11 @@ export function StreamPlayer({ stream, className }: StreamPlayerProps) {
             playsInline
             autoPlay
           />
+          {stream.privacy_active && <PrivacyOverlay />}
           <LivePill />
         </>
       ) : (
-        <OfflineOverlay thumbnail={stream.thumbnail_url} name={stream.name} />
+        <OfflineOverlay name={stream.name} />
       )}
     </div>
   )
@@ -149,19 +151,34 @@ function LivePill() {
   )
 }
 
-function OfflineOverlay({ thumbnail, name }: { thumbnail: string | null; name: string }) {
+function PrivacyOverlay() {
   return (
-    <div className="relative flex h-full w-full items-center justify-center">
-      {thumbnail && (
-        <img
-          src={thumbnail}
-          alt={name}
-          className="absolute inset-0 h-full w-full object-cover opacity-40"
-        />
-      )}
-      <div className="relative z-10 flex flex-col items-center gap-2 text-white">
-        <div className="rounded-full bg-white/20 px-3 py-1 text-sm font-medium">Offline</div>
-        <p className="text-xs text-white/70">{name}</p>
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black">
+      <DotLottieReact
+        src="https://lottie.host/0e1d94ba-e444-4aaa-8c7f-603671e2bc0d/SxuaxPKEze.lottie"
+        loop
+        autoplay
+        className="h-40 w-40"
+      />
+      <div className="mt-2 rounded-full bg-white/20 px-3 py-1 text-sm font-medium text-white">
+        Privacy mode
+      </div>
+    </div>
+  )
+}
+
+function OfflineOverlay({ name }: { name: string }) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-black">
+      <DotLottieReact
+        src="https://lottie.host/0e1d94ba-e444-4aaa-8c7f-603671e2bc0d/SxuaxPKEze.lottie"
+        loop
+        autoplay
+        className="h-40 w-40"
+      />
+      <div className="flex flex-col items-center gap-1">
+        <div className="rounded-full bg-white/20 px-3 py-1 text-sm font-medium text-white">Offline</div>
+        <p className="text-xs text-white/50">{name}</p>
       </div>
     </div>
   )

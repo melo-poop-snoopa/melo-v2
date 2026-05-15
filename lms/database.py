@@ -55,15 +55,20 @@ class MeloDB:
         self._client.table("streams").upsert(data).execute()
         logger.info("Upserted stream %s", stream_id)
 
-    def update_heartbeat(self, stream_id: str) -> None:
+    def update_heartbeat(self, stream_id: str, *, privacy_active: bool = False) -> None:
         self._client.table("streams").update(
-            {"last_heartbeat": datetime.now(timezone.utc).isoformat(), "status": "live"}
+            {
+                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+                "status": "live",
+                "privacy_active": privacy_active,
+            }
         ).eq("id", stream_id).execute()
 
     def set_stream_status(self, stream_id: str, status: str) -> None:
-        self._client.table("streams").update(
-            {"status": status}
-        ).eq("id", stream_id).execute()
+        data: dict[str, object] = {"status": status}
+        if status == "offline":
+            data["privacy_active"] = False
+        self._client.table("streams").update(data).eq("id", stream_id).execute()
         logger.info("Stream %s → %s", stream_id, status)
 
     def update_thumbnail_url(self, stream_id: str, url: str) -> None:

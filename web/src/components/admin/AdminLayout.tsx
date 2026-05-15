@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
-import { Camera, Cat, LayoutDashboard, Radio, LogOut } from "lucide-react"
+import { Camera, Cat, ExternalLink, LayoutDashboard, LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/store/auth-store"
 import { Button } from "@/components/ui/button"
@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button"
 const NAV = [
   { to: "/app/profile", label: "Shelter Profile", icon: LayoutDashboard },
   { to: "/app/cameras", label: "Cameras", icon: Camera },
-  { to: "/app/streams", label: "Streams", icon: Radio },
   { to: "/app/cats", label: "Cats", icon: Cat },
 ]
 
@@ -46,7 +45,17 @@ export function AdminLayout() {
           ))}
         </nav>
 
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-muted-foreground"
+            asChild
+          >
+            <a href="/" target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="mr-2 h-4 w-4" /> View Live Page
+            </a>
+          </Button>
           <Button
             variant="ghost"
             size="sm"

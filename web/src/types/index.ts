@@ -20,6 +20,7 @@ export interface Stream {
   thumbnail_url: string | null
   status: "live" | "offline" | "starting"
   last_heartbeat: string | null
+  privacy_active: boolean
   created_at: string
   updated_at: string
 }

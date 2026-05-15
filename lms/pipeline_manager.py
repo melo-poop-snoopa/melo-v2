@@ -107,7 +107,6 @@ class PipelineManager:
             secret_access_key=cfg.r2_secret_access_key,
             stream_id=stream_id,
             segment_dir=output_dir,
-            privacy_filter=privacy_filter,
         )
 
         pipeline.start()
@@ -120,7 +119,7 @@ class PipelineManager:
         if hls_url:
             self._db.client.table("streams").update({"hls_url": hls_url}).eq("id", stream_id).execute()
 
-        self._heartbeat.register(stream_id, pipeline, uploader)
+        self._heartbeat.register(stream_id, pipeline, uploader, privacy_filter)
 
         thumb: ThumbnailCapture | None = None
         if cfg.r2_public_base:
