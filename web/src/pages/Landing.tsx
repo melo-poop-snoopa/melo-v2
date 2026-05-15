@@ -62,7 +62,9 @@ export default function Landing() {
         )}
       </section>
 
-      {/* Shelter grid */}
+      {/* Shelter grid — hidden for demo */}
+      {/* TODO: restore shelter grid after demo — remove the `{false && (...)}` wrapper */}
+      {false && (
       <section className="mx-auto max-w-6xl px-6 pb-20">
         <div className="mb-8 flex items-center justify-between">
           <h2 className="font-display text-2xl font-bold text-foreground">Shelters</h2>
@@ -79,6 +81,7 @@ export default function Landing() {
           </div>
         )}
       </section>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-white/10 px-6 py-8 text-center text-sm text-muted-foreground">
