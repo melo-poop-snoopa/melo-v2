@@ -86,7 +86,6 @@ class PipelineManager:
                 stream_id=stream_id,
                 rtsp_url=rtsp_url,
                 confidence_threshold=cfg.privacy_confidence_threshold,
-                segment_duration=cfg.hls_segment_duration,
             )
             privacy_filter.start()
 
