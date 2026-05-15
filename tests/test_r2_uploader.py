@@ -63,12 +63,12 @@ def test_m3u8_always_reuploaded(
     (tmp_segments / "stream.m3u8").write_text("#EXTM3U\n")
 
     uploader._upload_new_files()
-    mock_s3_client.upload_file.reset_mock()
+    mock_s3_client.put_object.reset_mock()
 
     uploader._upload_new_files()
     m3u8_calls = [
-        c for c in mock_s3_client.upload_file.call_args_list
-        if c[0][2].endswith(".m3u8")
+        c for c in mock_s3_client.put_object.call_args_list
+        if str(c).find(".m3u8") != -1
     ]
     assert len(m3u8_calls) == 1
 
@@ -113,15 +113,15 @@ def test_content_type_m3u8(
 
     uploader._upload_new_files()
 
-    call_args = mock_s3_client.upload_file.call_args
-    assert call_args[1]["ExtraArgs"]["ContentType"] == "application/vnd.apple.mpegurl"
+    call_args = mock_s3_client.put_object.call_args
+    assert call_args[1]["ContentType"] == "application/vnd.apple.mpegurl"
 
 
 def test_last_upload_time_updated(
     uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
 ) -> None:
     initial_time = uploader.last_upload_time
-    assert initial_time > 0
+    assert initial_time == 0.0
 
     (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
     uploader._upload_new_files()
@@ -159,6 +159,114 @@ def test_upload_handles_unseekable_stream_error(
     uploader._upload_new_files()  # should not raise
 
 
+def test_playlist_deferred_when_segments_pending_on_disk(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """Playlist should NOT be uploaded if it references segments on disk but not yet uploaded."""
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n#EXTINF:2.0,\nseg_00002.ts\n"
+        "#EXTINF:2.0,\nseg_00003.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
+    (tmp_segments / "seg_00002.ts").write_bytes(b"\x00" * 100)
+    (tmp_segments / "seg_00003.ts").write_bytes(b"\x00" * 100)
+
+    # Simulate only seg_00001 being discovered by making upload_file fail for 2 and 3
+    original_upload = mock_s3_client.upload_file
+    call_count = {"n": 0}
+
+    def fail_after_first(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] > 1:
+            raise FileNotFoundError("simulated")
+        return original_upload(*args, **kwargs)
+
+    mock_s3_client.upload_file.side_effect = fail_after_first
+
+    uploader._upload_new_files()
+
+    m3u8_puts = [
+        c for c in mock_s3_client.put_object.call_args_list
+        if "m3u8" in str(c)
+    ]
+    assert len(m3u8_puts) == 0
+
+
+def test_playlist_uploaded_when_all_segments_present(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """Playlist should be uploaded once all referenced segments have been uploaded."""
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n#EXTINF:2.0,\nseg_00002.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
+    (tmp_segments / "seg_00002.ts").write_bytes(b"\x00" * 100)
+
+    uploader._upload_new_files()
+
+    m3u8_puts = [
+        c for c in mock_s3_client.put_object.call_args_list
+        if "m3u8" in str(c)
+    ]
+    assert len(m3u8_puts) == 1
+
+
+def test_playlist_deferred_then_uploaded_next_cycle(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """Simulate the race: first cycle defers (segment on disk), second cycle uploads."""
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n#EXTINF:2.0,\nseg_00002.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
+    # seg_00002 exists on disk but upload fails — simulates pending segment
+    (tmp_segments / "seg_00002.ts").write_bytes(b"\x00" * 100)
+
+    original_upload = mock_s3_client.upload_file
+    call_count = {"n": 0}
+
+    def fail_after_first(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] > 1:
+            raise FileNotFoundError("simulated")
+        return original_upload(*args, **kwargs)
+
+    mock_s3_client.upload_file.side_effect = fail_after_first
+
+    uploader._upload_new_files()
+    assert all("m3u8" not in str(c) for c in mock_s3_client.put_object.call_args_list)
+
+    mock_s3_client.upload_file.side_effect = None
+    mock_s3_client.put_object.reset_mock()
+
+    uploader._upload_new_files()
+    m3u8_puts = [
+        c for c in mock_s3_client.put_object.call_args_list
+        if "m3u8" in str(c)
+    ]
+    assert len(m3u8_puts) == 1
+
+
+def test_parse_m3u8_segments() -> None:
+    m3u8 = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n#EXTINF:2.0,\nseg_00002.ts\n"
+        "#EXTINF:2.0,\nseg_00003.ts\n"
+    )
+    result = R2Uploader._parse_m3u8_segments(m3u8)
+    assert result == {"seg_00001.ts", "seg_00002.ts", "seg_00003.ts"}
+
+
+def test_parse_m3u8_segments_empty() -> None:
+    assert R2Uploader._parse_m3u8_segments("#EXTM3U\n") == set()
+
+
 def test_upload_skips_file_deleted_before_upload(
     uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
 ) -> None:
@@ -170,3 +278,101 @@ def test_upload_skips_file_deleted_before_upload(
     uploader._upload_new_files()
 
     mock_s3_client.upload_file.assert_not_called()
+
+
+def test_playlist_uploaded_when_segments_lost_from_disk(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """Playlist should be uploaded if missing segments are gone from disk (lost)."""
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n#EXTINF:2.0,\nseg_00002.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
+    # seg_00002.ts intentionally NOT on disk — simulates FFmpeg deleting it
+
+    uploader._upload_new_files()
+
+    m3u8_puts = [
+        c for c in mock_s3_client.put_object.call_args_list
+        if "m3u8" in str(c)
+    ]
+    assert len(m3u8_puts) == 1
+    assert "seg_00002.ts" in uploader._lost_segments
+
+
+def test_lost_segments_tracked_across_cycles(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """Lost segments should not block subsequent playlist uploads."""
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n#EXTINF:2.0,\nseg_00002.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
+
+    uploader._upload_new_files()
+    assert "seg_00002.ts" in uploader._lost_segments
+
+    mock_s3_client.put_object.reset_mock()
+
+    # Second cycle: same playlist, lost segment already tracked
+    uploader._upload_new_files()
+
+    m3u8_puts = [
+        c for c in mock_s3_client.put_object.call_args_list
+        if "m3u8" in str(c)
+    ]
+    assert len(m3u8_puts) == 1
+
+
+def test_playlist_deferred_with_mix_of_pending_and_lost(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """Playlist deferred if any segment is pending on disk, even if others are lost."""
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n#EXTINF:2.0,\nseg_00002.ts\n"
+        "#EXTINF:2.0,\nseg_00003.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
+    # seg_00002.ts on disk but not uploaded (pending)
+    (tmp_segments / "seg_00002.ts").write_bytes(b"\x00" * 100)
+    # seg_00003.ts NOT on disk (lost)
+
+    # Only upload seg_00001 by making upload_file fail for seg_00002
+    original_upload = mock_s3_client.upload_file
+    call_count = {"n": 0}
+
+    def fail_after_first(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] > 1:
+            raise FileNotFoundError("simulated")
+        return original_upload(*args, **kwargs)
+
+    mock_s3_client.upload_file.side_effect = fail_after_first
+
+    uploader._upload_new_files()
+
+    # seg_00003 is lost, seg_00002 is pending → playlist deferred
+    assert "seg_00003.ts" in uploader._lost_segments
+    m3u8_puts = [
+        c for c in mock_s3_client.put_object.call_args_list
+        if "m3u8" in str(c)
+    ]
+    assert len(m3u8_puts) == 0
+
+    # Now upload seg_00002 successfully
+    mock_s3_client.upload_file.side_effect = None
+    mock_s3_client.put_object.reset_mock()
+
+    uploader._upload_new_files()
+
+    m3u8_puts = [
+        c for c in mock_s3_client.put_object.call_args_list
+        if "m3u8" in str(c)
+    ]
+    assert len(m3u8_puts) == 1
