@@ -154,40 +154,55 @@ class R2Uploader:
             logger.debug("Playlist %s vanished before upload", path.name)
             return
 
-        referenced = self._parse_m3u8_segments(raw)
-        not_uploaded = referenced - self._uploaded - self._lost_segments
-        if not_uploaded:
-            pending = {s for s in not_uploaded if (self._segment_dir / s).exists()}
-            lost = not_uploaded - pending
-
-            if lost:
-                logger.warning(
-                    "Lost %d segment(s) for %s (deleted before upload): %s",
-                    len(lost), self._stream_id, ", ".join(sorted(lost)),
-                )
-                self._lost_segments.update(lost)
-
-            if pending and len(pending) > len(referenced) // 2:
-                logger.debug(
-                    "Deferring playlist %s: %d/%d segment(s) pending upload",
-                    path.name, len(pending), len(referenced),
-                )
-                return
+        trimmed = self._trim_playlist_to_uploaded(raw)
+        if trimmed is None:
+            logger.debug("Playlist %s: no uploaded segments yet, skipping", path.name)
+            return
 
         key = f"{self._prefix}/{path.name}"
-
-        m3u8_cache = "no-cache, no-store"
-
         try:
             self._s3.put_object(
                 Bucket=self._bucket,
                 Key=key,
-                Body=raw.encode("utf-8"),
+                Body=trimmed.encode("utf-8"),
                 ContentType=_CONTENT_TYPES[".m3u8"],
-                CacheControl=m3u8_cache,
+                CacheControl="no-cache, no-store",
             )
         except Exception:
             logger.exception("Failed to upload playlist %s", path.name)
+
+    def _trim_playlist_to_uploaded(self, raw: str) -> str | None:
+        """Rewrite the playlist to only reference segments already uploaded to R2.
+
+        Truncates at the first non-uploaded segment, so the browser never gets
+        a 404 for a segment that hasn't been pushed yet. Returns None if no
+        segments are uploaded yet.
+        """
+        lines = raw.splitlines()
+        output: list[str] = []
+        pending_extinf: str | None = None
+        segment_count = 0
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("#EXTINF"):
+                pending_extinf = line
+                continue
+            if stripped.endswith(".ts"):
+                if stripped in self._uploaded:
+                    if pending_extinf is not None:
+                        output.append(pending_extinf)
+                    output.append(line)
+                    pending_extinf = None
+                    segment_count += 1
+                else:
+                    break
+            else:
+                output.append(line)
+
+        if segment_count == 0:
+            return None
+        return "\n".join(output) + "\n"
 
     def _put_file(self, path: Path) -> bool:
         if not path.exists():

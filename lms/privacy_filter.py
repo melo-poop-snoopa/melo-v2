@@ -106,8 +106,15 @@ class PrivacyFilter:
                         "Stream %s: frame #%d shape=%s mean_pixel=%.1f",
                         self._stream_id, frame_count, img.shape, img.mean(),
                     )
+                    try:
+                        from PIL import Image
+                        debug_path = f"/tmp/melo-debug-{self._stream_id[:8]}-f{frame_count}.jpg"
+                        Image.fromarray(img).save(debug_path, quality=85)
+                        logger.info("Saved debug frame to %s", debug_path)
+                    except Exception:
+                        logger.exception("Failed to save debug frame")
 
-                results = self._model(img, classes=[0], conf=0.15, verbose=False)
+                results = self._model(img, classes=[0], conf=0.10, verbose=False)
 
                 detected = any(
                     float(box.conf) >= self._confidence_threshold
