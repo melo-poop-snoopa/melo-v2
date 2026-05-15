@@ -31,7 +31,6 @@ class R2Uploader:
         secret_access_key: str,
         stream_id: str,
         segment_dir: Path,
-        privacy_filter=None,
     ) -> None:
         self._s3 = boto3.client(
             "s3",
@@ -44,18 +43,15 @@ class R2Uploader:
         self._segment_dir = segment_dir
         self._prefix = f"live-segments/{stream_id}"
         self._uploaded: set[str] = set()
-        self._brb_segments: set[str] = set()
         self._lost_segments: set[str] = set()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_upload_time: float = 0.0
         self._upload_count: int = 0
-        self._privacy_filter = privacy_filter
 
     def start(self) -> None:
         self._clear_remote()
         self._uploaded.clear()
-        self._brb_segments.clear()
         self._lost_segments.clear()
         self._upload_count = 0
         self._stop_event.clear()
@@ -120,26 +116,9 @@ class R2Uploader:
         content_type = _CONTENT_TYPES[".ts"]
         key = f"{self._prefix}/{path.name}"
 
-        if self._privacy_filter and self._privacy_filter.is_human_detected():
-            brb = self._privacy_filter.brb_segment
-            if brb:
-                self._s3.put_object(
-                    Bucket=self._bucket,
-                    Key=key,
-                    Body=brb,
-                    ContentType=content_type,
-                )
-                self._uploaded.add(path.name)
-                self._brb_segments.add(path.name)
-                self._upload_count += 1
-                self._last_upload_time = time.time()
-                logger.debug("Uploaded BRB segment in place of %s", path.name)
-                return
-
         if not self._put_file(path):
             return
         self._uploaded.add(path.name)
-        self._brb_segments.discard(path.name)
         self._upload_count += 1
         self._last_upload_time = time.time()
         logger.info("Uploaded %s → %s", path.name, key)
@@ -183,44 +162,11 @@ class R2Uploader:
 
         m3u8_cache = "no-cache, no-store"
 
-        if not self._brb_segments:
-            try:
-                self._s3.put_object(
-                    Bucket=self._bucket,
-                    Key=key,
-                    Body=raw.encode("utf-8"),
-                    ContentType=_CONTENT_TYPES[".m3u8"],
-                    CacheControl=m3u8_cache,
-                )
-            except Exception:
-                logger.exception("Failed to upload playlist %s", path.name)
-            return
-
-        lines = raw.splitlines()
-        output: list[str] = []
-        prev_was_brb: bool | None = None
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            if line.startswith("#EXTINF") and i + 1 < len(lines) and not lines[i + 1].startswith("#"):
-                seg_name = lines[i + 1].strip()
-                is_brb = seg_name in self._brb_segments
-                if prev_was_brb is not None and is_brb != prev_was_brb:
-                    output.append("#EXT-X-DISCONTINUITY")
-                prev_was_brb = is_brb
-                output.append(line)
-                output.append(lines[i + 1])
-                i += 2
-                continue
-            output.append(line)
-            i += 1
-
-        modified = "\n".join(output) + "\n"
         try:
             self._s3.put_object(
                 Bucket=self._bucket,
                 Key=key,
-                Body=modified.encode("utf-8"),
+                Body=raw.encode("utf-8"),
                 ContentType=_CONTENT_TYPES[".m3u8"],
                 CacheControl=m3u8_cache,
             )
@@ -260,5 +206,4 @@ class R2Uploader:
             if stale:
                 path.unlink(missing_ok=True)
                 self._uploaded.discard(path.name)
-                self._brb_segments.discard(path.name)
                 logger.info("Deleted stale local segment %s", path.name)

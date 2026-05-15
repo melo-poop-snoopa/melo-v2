@@ -41,7 +41,7 @@ export default function Landing() {
       <section className="relative flex flex-col items-center gap-8 px-6 py-16 text-center">
         <div className="max-w-2xl">
           <h1 className="font-display text-5xl font-bold leading-tight text-foreground">
-            Watch cats. <span className="text-melo-500">Adopt one.</span>
+            Watch cats. <span className="text-melo-500">Find your fav.</span>
           </h1>
           <p className="mt-4 text-lg text-muted-foreground">
             Live streams from shelters. Meet cats in real time, then give them a home.
