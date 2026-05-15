@@ -21,6 +21,7 @@ apt-get install -y --no-install-recommends \
 echo "==> Installing uv"
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
+ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv
 
 # Verify Python version
 PYTHON_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
@@ -43,7 +44,7 @@ chown "$MELO_USER:$MELO_USER" "$MELO_DIR"
 # Copy LMS code (run from repo root)
 if [[ -f "pyproject.toml" ]]; then
   echo "==> Copying LMS code to $MELO_DIR"
-  cp -r lms pyproject.toml "$MELO_DIR/"
+  cp -r lms setup pyproject.toml uv.lock "$MELO_DIR/"
   chown -R "$MELO_USER:$MELO_USER" "$MELO_DIR"
 fi
 
