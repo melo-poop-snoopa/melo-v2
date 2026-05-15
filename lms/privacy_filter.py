@@ -100,6 +100,13 @@ class PrivacyFilter:
 
                 frame_count += 1
                 img = frame.to_ndarray(format="rgb24")
+
+                if frame_count <= 3:
+                    logger.info(
+                        "Stream %s: frame #%d shape=%s mean_pixel=%.1f",
+                        self._stream_id, frame_count, img.shape, img.mean(),
+                    )
+
                 results = self._model(img, classes=[0], conf=0.15, verbose=False)
 
                 detected = any(
