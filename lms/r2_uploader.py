@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import boto3
+import botocore.config
 import botocore.exceptions
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,11 @@ class R2Uploader:
             endpoint_url=endpoint,
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
+            config=botocore.config.Config(
+                connect_timeout=5,
+                read_timeout=10,
+                retries={"max_attempts": 2},
+            ),
         )
         self._bucket = bucket
         self._stream_id = stream_id
