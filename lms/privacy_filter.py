@@ -1,27 +1,22 @@
 """
-Privacy filter: detects humans in RTSP stream frames and swaps HLS segments.
+Privacy filter: detects humans in RTSP stream frames.
 
 Opens a sub-stream RTSP connection via PyAV, decodes at 2 fps, and runs
 YOLOv8-nano inference on class 0 (person). Sets a per-instance flag that
-R2Uploader reads before each .ts upload. Pre-encodes a BRB .ts segment from
-assets/brb.png at startup so the swap is latency-free.
+the heartbeat manager writes to Supabase as ``privacy_active``.
 """
 from __future__ import annotations
 
 import logging
-import subprocess
-import tempfile
 import threading
 import time
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 _DETECT_FPS = 2
 _FRAME_INTERVAL = 1.0 / _DETECT_FPS
 _ACTIVATION_FRAMES = _DETECT_FPS * 5   # 5 seconds of sustained detection before activating
-_DEACTIVATION_FRAMES = _DETECT_FPS * 25  # counter ceiling; BRB clears after this many missed frames
-_ASSETS_DIR = Path(__file__).parent.parent / "assets"
+_DEACTIVATION_FRAMES = _DETECT_FPS * 25  # counter ceiling; clears after this many missed frames
 
 
 class PrivacyFilter:
@@ -30,22 +25,18 @@ class PrivacyFilter:
         stream_id: str,
         rtsp_url: str,
         confidence_threshold: float = 0.39,
-        segment_duration: int = 4,
     ) -> None:
         self._stream_id = stream_id
         self._rtsp_url = rtsp_url
         self._confidence_threshold = confidence_threshold
-        self._segment_duration = segment_duration
         self._human_detected = False
         self._consecutive_detections = 0
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._brb_segment: bytes | None = None
         self._model = None
 
     def start(self) -> None:
-        self._brb_segment = _encode_brb_segment(self._segment_duration)
         self._model = _load_model()
         self._stop_event.clear()
         self._thread = threading.Thread(
@@ -64,10 +55,6 @@ class PrivacyFilter:
     def is_human_detected(self) -> bool:
         with self._lock:
             return self._human_detected
-
-    @property
-    def brb_segment(self) -> bytes | None:
-        return self._brb_segment
 
     def _detection_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -160,60 +147,3 @@ def _load_model():
     except Exception:
         logger.exception("Failed to load YOLOv8-nano — privacy filter will not run")
         return None
-
-
-def _encode_brb_segment(segment_duration: int) -> bytes | None:
-    brb_png = _ASSETS_DIR / "brb.png"
-    if not brb_png.exists():
-        _generate_brb_png(brb_png)
-
-    with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
-        out_path = Path(f.name)
-
-    try:
-        cmd = [
-            "ffmpeg", "-y",
-            "-loop", "1",
-            "-i", str(brb_png),
-            "-t", str(segment_duration),
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-tune", "stillimage",
-            "-an",
-            "-f", "mpegts",
-            str(out_path),
-        ]
-        result = subprocess.run(cmd, capture_output=True, timeout=30)
-        if result.returncode != 0:
-            logger.error("BRB segment encoding failed: %s", result.stderr.decode())
-            return None
-        data = out_path.read_bytes()
-        logger.info("BRB segment pre-encoded (%d bytes)", len(data))
-        return data
-    except Exception:
-        logger.exception("Failed to encode BRB segment")
-        return None
-    finally:
-        out_path.unlink(missing_ok=True)
-
-
-def _generate_brb_png(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-
-        img = Image.new("RGB", (1280, 720), color=(0x1A, 0x1A, 0x2E))
-        draw = ImageDraw.Draw(img)
-        try:
-            font = ImageFont.load_default(size=72)
-        except TypeError:
-            font = ImageFont.load_default()
-        text = "Be Right Back"
-        bbox = draw.textbbox((0, 0), text, font=font)
-        x = (1280 - (bbox[2] - bbox[0])) // 2
-        y = (720 - (bbox[3] - bbox[1])) // 2
-        draw.text((x, y), text, fill="white", font=font)
-        img.save(path)
-        logger.info("Generated brb.png at %s", path)
-    except Exception:
-        logger.warning("Could not generate brb.png", exc_info=True)
