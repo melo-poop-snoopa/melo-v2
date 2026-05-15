@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom"
-import { Camera, Cat, ExternalLink, LayoutDashboard, LogOut } from "lucide-react"
+import { Camera, Cat, ExternalLink, LayoutDashboard, LogOut, Settings } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/store/auth-store"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,7 @@ const NAV = [
   { to: "/app/profile", label: "Shelter Profile", icon: LayoutDashboard },
   { to: "/app/cameras", label: "Cameras", icon: Camera },
   { to: "/app/cats", label: "Cats", icon: Cat },
+  { to: "/app/settings", label: "Settings", icon: Settings },
 ]
 
 export function AdminLayout() {
