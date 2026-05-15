@@ -25,7 +25,7 @@ class Config:
 
     # HLS
     hls_segment_duration: int = 2
-    hls_playlist_size: int = 5
+    hls_playlist_size: int = 10
     hls_output_dir: Path = field(default_factory=lambda: Path("./segments"))
     hls_video_codec: str = "libx264"
     hls_preset: str = "ultrafast"
@@ -36,7 +36,7 @@ class Config:
 
     # Privacy filter
     privacy_filter_enabled: bool = True
-    privacy_confidence_threshold: float = 0.5
+    privacy_confidence_threshold: float = 0.39
 
     # Thumbnail
     thumbnail_interval: int = 30
@@ -80,14 +80,14 @@ def load_config() -> Config:
         r2_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
         shelter_id=os.environ["SHELTER_ID"],
         hls_segment_duration=int(os.environ.get("HLS_SEGMENT_DURATION", "2")),
-        hls_playlist_size=int(os.environ.get("HLS_PLAYLIST_SIZE", "5")),
+        hls_playlist_size=int(os.environ.get("HLS_PLAYLIST_SIZE", "10")),
         hls_output_dir=Path(os.environ.get("HLS_OUTPUT_DIR", "./segments")),
         hls_video_codec=os.environ.get("HLS_VIDEO_CODEC", "libx264"),
         hls_preset=os.environ.get("HLS_PRESET", "ultrafast"),
         hls_fps=int(os.environ.get("HLS_FPS", "30")),
         heartbeat_interval=int(os.environ.get("HEARTBEAT_INTERVAL", "15")),
         privacy_filter_enabled=os.environ.get("PRIVACY_FILTER_ENABLED", "true").lower() not in ("0", "false", "no"),
-        privacy_confidence_threshold=float(os.environ.get("PRIVACY_CONFIDENCE_THRESHOLD", "0.5")),
+        privacy_confidence_threshold=float(os.environ.get("PRIVACY_CONFIDENCE_THRESHOLD", "0.35")),
         thumbnail_interval=int(os.environ.get("THUMBNAIL_INTERVAL", "30")),
         r2_public_base=os.environ.get("R2_PUBLIC_BASE", ""),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),

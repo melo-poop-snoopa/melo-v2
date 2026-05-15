@@ -21,9 +21,9 @@ export function StreamPlayer({ stream, className }: StreamPlayerProps) {
 
     if (Hls.isSupported()) {
       const hls = new Hls({
-        enableWorker: false,
-        liveSyncDurationCount: 2,
-        liveMaxLatencyDurationCount: 4,
+        enableWorker: true,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 8,
         liveDurationInfinity: true,
         backBufferLength: 0,
         manifestLoadingMaxRetry: 6,
@@ -38,21 +38,71 @@ export function StreamPlayer({ stream, className }: StreamPlayerProps) {
       hls.attachMedia(video)
       hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}))
 
+      let mediaRecoveryAttempted = false
+
+      hls.on(Hls.Events.LEVEL_UPDATED, (_event, data) => {
+        const details = data.details
+        const frags = details.fragments
+        const seqStart = frags[0]?.sn
+        const seqEnd = frags[frags.length - 1]?.sn
+        const durations = frags.map((f: { duration: number }) => f.duration.toFixed(2))
+        console.log(
+          `[melo:playlist] seq=${seqStart}-${seqEnd} frags=${frags.length} ` +
+          `targetDur=${details.targetduration} totDur=${details.totalduration?.toFixed(1)} ` +
+          `durations=[${durations.join(',')}]`
+        )
+      })
+
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
-          console.warn(`[melo] segment fetch failed: ${data.frag?.relurl} (${data.response?.code})`)
-        } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
-          console.warn(`[melo] segment fetch timed out: ${data.frag?.relurl}`)
-        } else if (data.fatal) {
-          console.error(`[melo] fatal HLS error: ${data.type} / ${data.details}`)
+        console.warn(
+          `[melo:error] type=${data.type} detail=${data.details} fatal=${data.fatal} ` +
+          `frag=${data.frag?.relurl ?? 'n/a'} response=${data.response?.code ?? 'n/a'}`
+        )
+
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              if (!mediaRecoveryAttempted) {
+                mediaRecoveryAttempted = true
+                hls.recoverMediaError()
+              } else {
+                mediaRecoveryAttempted = false
+                hls.swapAudioCodec()
+                hls.recoverMediaError()
+              }
+              break
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hls.startLoad()
+              break
+          }
         }
+      })
+
+      video.addEventListener('seeking', () => {
+        const buffered = video.buffered
+        const ranges = []
+        for (let i = 0; i < buffered.length; i++) {
+          ranges.push(`${buffered.start(i).toFixed(1)}-${buffered.end(i).toFixed(1)}`)
+        }
+        console.log(
+          `[melo:seek] currentTime=${video.currentTime.toFixed(2)} ` +
+          `buffered=[${ranges.join(',')}] ` +
+          `latency=${hls.latency?.toFixed(2) ?? '?'} ` +
+          `liveSyncPos=${hls.liveSyncPosition?.toFixed(2) ?? '?'}`
+        )
       })
 
       let lastSn = -1
       hls.on(Hls.Events.FRAG_CHANGED, (_event, data) => {
+        mediaRecoveryAttempted = false
         const sn = data.frag.sn as number
+        const dur = data.frag.duration
         if (lastSn >= 0 && sn > lastSn + 1) {
-          console.warn(`[melo] skipped ${sn - lastSn - 1} segment(s): jumped from sn=${lastSn} to sn=${sn}`)
+          console.warn(
+            `[melo:skip] skipped ${sn - lastSn - 1} seg(s): sn=${lastSn}→${sn} ` +
+            `fragDur=${dur?.toFixed(2)} currentTime=${video.currentTime.toFixed(2)} ` +
+            `latency=${hls.latency?.toFixed(2) ?? '?'}`
+          )
         }
         lastSn = sn
       })

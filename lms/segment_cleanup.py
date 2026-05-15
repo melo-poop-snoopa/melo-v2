@@ -65,4 +65,4 @@ class SegmentCleanup:
                 path.unlink(missing_ok=True)
                 deleted += 1
         if deleted:
-            logger.debug("Cleaned %d stale segment(s) from %s", deleted, segment_dir)
+            logger.info("Cleaned %d stale segment(s) from %s", deleted, segment_dir)
