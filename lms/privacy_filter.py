@@ -73,7 +73,11 @@ class PrivacyFilter:
         logger.info("Stream %s: opening RTSP for detection: %s", self._stream_id, self._rtsp_url)
         container = av.open(
             self._rtsp_url,
-            options={"rtsp_transport": "tcp", "stimeout": "5000000"},
+            options={
+                "rtsp_transport": "tcp",
+                "stimeout": "5000000",
+                "timeout": "10000000",
+            },
         )
         try:
             video = container.streams.video[0]

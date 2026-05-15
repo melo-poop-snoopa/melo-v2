@@ -134,7 +134,7 @@ class HLSPipeline:
 
         while not self._stop_event.is_set():
             if self._process:
-                self._process.wait()
+                self._wait_or_detect_stall()
             if self._stop_event.is_set():
                 break
 
@@ -152,6 +152,34 @@ class HLSPipeline:
                     "Stream %s: permanent reconnect failure", self._stream_id
                 ),
             )
+
+    def _wait_or_detect_stall(self) -> None:
+        _STALL_TIMEOUT = 30
+        last_seg = self.last_segment_time
+        stall_since: float | None = None
+
+        while not self._stop_event.is_set():
+            try:
+                self._process.wait(timeout=5)
+                return
+            except subprocess.TimeoutExpired:
+                pass
+
+            current_seg = self.last_segment_time
+            if current_seg != last_seg:
+                last_seg = current_seg
+                stall_since = None
+            else:
+                if stall_since is None:
+                    stall_since = time.time()
+                elif time.time() - stall_since > _STALL_TIMEOUT:
+                    logger.warning(
+                        "FFmpeg stalled for stream %s (no new segment in %ds) — killing",
+                        self._stream_id, _STALL_TIMEOUT,
+                    )
+                    self._process.kill()
+                    self._process.wait(timeout=5)
+                    return
 
     def _try_restart(self) -> bool:
         try:
