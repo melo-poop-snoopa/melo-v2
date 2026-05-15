@@ -26,6 +26,7 @@ class HLSPipeline:
         video_codec: str = "libx264",
         preset: str = "ultrafast",
         fps: int = 30,
+        video_bitrate: str = "800k",
     ) -> None:
         self._stream_id = stream_id
         self._rtsp_url = rtsp_url
@@ -35,6 +36,7 @@ class HLSPipeline:
         self._video_codec = video_codec
         self._preset = preset
         self._fps = fps
+        self._video_bitrate = video_bitrate
         self._process: subprocess.Popen[bytes] | None = None
         self._stop_event = threading.Event()
         self._watchdog_thread: threading.Thread | None = None
@@ -103,6 +105,9 @@ class HLSPipeline:
             "-c:v", self._video_codec,
             "-preset", self._preset,
             "-tune", "zerolatency",
+            "-b:v", self._video_bitrate,
+            "-maxrate", self._video_bitrate,
+            "-bufsize", self._video_bitrate,
             "-g", str(gop_size),
             "-keyint_min", str(gop_size),
             "-sc_threshold", "0",
@@ -111,7 +116,7 @@ class HLSPipeline:
             "-f", "hls",
             "-hls_time", str(self._segment_duration),
             "-hls_list_size", str(self._playlist_size),
-            "-hls_flags", "append_list",
+            "-hls_flags", "append_list+delete_segments",
             "-hls_segment_filename", segment_pattern,
             playlist_path,
         ]

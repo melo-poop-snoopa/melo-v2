@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import boto3
@@ -54,6 +55,9 @@ class R2Uploader:
         self._thread: threading.Thread | None = None
         self._last_upload_time: float = 0.0
         self._upload_count: int = 0
+        self._upload_pool = ThreadPoolExecutor(
+            max_workers=3, thread_name_prefix=f"r2-worker-{stream_id}"
+        )
 
     def start(self) -> None:
         self._clear_remote()
@@ -71,6 +75,7 @@ class R2Uploader:
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=10)
+        self._upload_pool.shutdown(wait=False)
         logger.info("R2 uploader stopped for stream %s", self._stream_id)
 
     @property
@@ -112,8 +117,13 @@ class R2Uploader:
             elif path.suffix == ".m3u8":
                 playlists.append(path)
 
-        for path in segments:
-            self._upload_segment(path)
+        if segments:
+            futures = [self._upload_pool.submit(self._upload_segment, p) for p in segments]
+            for f in as_completed(futures):
+                try:
+                    f.result()
+                except Exception:
+                    logger.exception("Segment upload failed for stream %s", self._stream_id)
 
         for path in playlists:
             self._upload_playlist(path)
@@ -157,10 +167,10 @@ class R2Uploader:
                 )
                 self._lost_segments.update(lost)
 
-            if pending:
+            if pending and len(pending) > len(referenced) // 2:
                 logger.debug(
-                    "Deferring playlist %s: %d segment(s) pending upload: %s",
-                    path.name, len(pending), ", ".join(sorted(pending)),
+                    "Deferring playlist %s: %d/%d segment(s) pending upload",
+                    path.name, len(pending), len(referenced),
                 )
                 return
 

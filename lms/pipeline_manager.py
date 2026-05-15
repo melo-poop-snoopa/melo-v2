@@ -98,6 +98,7 @@ class PipelineManager:
             video_codec=cfg.hls_video_codec,
             preset=cfg.hls_preset,
             fps=cfg.hls_fps,
+            video_bitrate=cfg.hls_video_bitrate,
         )
         uploader = R2Uploader(
             bucket=cfg.r2_bucket,
