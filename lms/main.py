@@ -9,9 +9,11 @@ and configuration from the admin dashboard.
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import signal
 import threading
+from pathlib import Path
 
 import boto3
 from dotenv import load_dotenv
@@ -39,13 +41,25 @@ def _get_local_ip() -> str:
         return "127.0.0.1"
 
 
-def _start_setup_api(cfg, db, pipeline_mgr: PipelineManager) -> threading.Thread:
+def _start_setup_api(
+    cfg,
+    db,
+    pipeline_mgr: PipelineManager,
+    heartbeat: HeartbeatManager,
+    cleanup: SegmentCleanup,
+    file_handler: logging.FileHandler | None,
+    session_log_path: str | None,
+) -> threading.Thread:
     """Start the setup API server in a background thread."""
     from setup.app import app, _state
 
     _state["cfg"] = cfg
     _state["db"] = db
     _state["pipeline_manager"] = pipeline_mgr
+    _state["heartbeat"] = heartbeat
+    _state["cleanup"] = cleanup
+    _state["file_handler"] = file_handler
+    _state["session_log_path"] = session_log_path
 
     def run():
         import uvicorn
@@ -66,10 +80,26 @@ def main() -> None:
     load_dotenv()
     cfg = load_config()
 
+    log_format = "%(asctime)s %(levelname)-8s %(name)s  %(message)s"
     logging.basicConfig(
         level=getattr(logging, cfg.log_level, logging.INFO),
-        format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
+        format=log_format,
     )
+
+    # Session file logging
+    file_handler: logging.FileHandler | None = None
+    session_log_path: str | None = None
+    try:
+        log_dir = Path("/var/log/melo")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+        session_log_path = str(log_dir / f"session_{ts}.log")
+        file_handler = logging.FileHandler(session_log_path)
+        file_handler.setFormatter(logging.Formatter(log_format))
+        logging.getLogger().addHandler(file_handler)
+        logger.info("Session log: %s", session_log_path)
+    except PermissionError:
+        logger.warning("Cannot write to /var/log/melo/ — session logs disabled")
 
     db = MeloDB(cfg.supabase_url, cfg.supabase_service_role_key)
 
@@ -95,7 +125,9 @@ def main() -> None:
     )
 
     # Start the setup API for camera discovery/configuration
-    _start_setup_api(cfg, db, pipeline_mgr)
+    _start_setup_api(
+        cfg, db, pipeline_mgr, heartbeat, cleanup, file_handler, session_log_path,
+    )
 
     cameras = db.get_cameras_for_shelter(cfg.shelter_id)
     logger.info("Found %d camera(s) for shelter %s", len(cameras), cfg.shelter_id)
@@ -106,8 +138,12 @@ def main() -> None:
     heartbeat.start()
     cleanup.start()
 
-    # Block until signal
+    # Block until signal or API-triggered shutdown
     stop = threading.Event()
+
+    # Share with setup API so the shutdown endpoint can unblock us
+    from setup.app import _state as api_state
+    api_state["stop_event"] = stop
 
     def _shutdown(*_):
         stop.set()
@@ -118,8 +154,14 @@ def main() -> None:
     logger.info("LMS running — setup API on :8000")
     stop.wait()
 
-    # Graceful shutdown
+    # Graceful shutdown — managers may already be stopped by the API endpoint,
+    # but these calls are safe to repeat (they're idempotent).
     logger.info("Shutting down...")
     heartbeat.stop()
     cleanup.stop()
     pipeline_mgr.stop_all()
+    logger.info("LMS process exiting.")
+
+    # Force exit — uvicorn's daemon thread would otherwise keep the process alive
+    import os
+    os._exit(0)

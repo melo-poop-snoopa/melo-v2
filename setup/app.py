@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import subprocess
+import time
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -100,6 +102,11 @@ class SaveCameraResponse(BaseModel):
 class DeleteCameraRequest(BaseModel):
     camera_id: str
     stream_id: str | None = None
+
+
+class ShutdownResponse(BaseModel):
+    status: str
+    shutdown_duration_seconds: float
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -279,6 +286,63 @@ async def delete_camera(req: DeleteCameraRequest):
 
     logger.info("Deleted camera %s", req.camera_id)
     return {"status": "ok"}
+
+
+@app.post("/api/shutdown", response_model=ShutdownResponse)
+async def shutdown():
+    """Gracefully stop all pipelines, save logs, and power off."""
+    pipeline_mgr = _state.get("pipeline_manager")
+    if not pipeline_mgr:
+        raise HTTPException(503, "Not running inside LMS — shutdown unavailable")
+
+    start = time.monotonic()
+
+    pipeline_mgr.stop_all()
+
+    heartbeat = _state.get("heartbeat")
+    if heartbeat:
+        heartbeat.stop()
+
+    cleanup = _state.get("cleanup")
+    if cleanup:
+        cleanup.stop()
+
+    duration = round(time.monotonic() - start, 1)
+
+    session_log_path = _state.get("session_log_path", "unknown")
+    logger.info(
+        "LMS shutdown complete. Duration: %.1fs. Session log: %s",
+        duration,
+        session_log_path,
+    )
+
+    file_handler = _state.get("file_handler")
+    if file_handler:
+        file_handler.flush()
+        file_handler.close()
+        logging.getLogger().removeHandler(file_handler)
+
+    # Signal the main thread to exit
+    stop_event = _state.get("stop_event")
+    if stop_event:
+        stop_event.set()
+
+    cfg = _get_config()
+    local_dev = cfg.local_dev if cfg else os.environ.get("LOCAL_DEV", "").lower() in ("1", "true", "yes")
+
+    if local_dev:
+        logger.info("LOCAL_DEV=true — skipping OS shutdown")
+    else:
+        import sys
+        if sys.platform == "linux":
+            cmd = ["sudo", "/sbin/shutdown", "now"]
+        else:
+            cmd = ["sudo", "/sbin/shutdown", "-h", "now"]
+
+        loop = asyncio.get_event_loop()
+        loop.call_later(0.5, lambda: subprocess.Popen(cmd))
+
+    return ShutdownResponse(status="shutting_down", shutdown_duration_seconds=duration)
 
 
 # ── Standalone entry point ───────────────────────────────────────────────────

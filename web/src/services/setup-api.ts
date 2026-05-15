@@ -122,6 +122,23 @@ export async function saveCamera(
   return res.json()
 }
 
+export interface ShutdownResponse {
+  status: string
+  shutdown_duration_seconds: number
+}
+
+export async function shutdownLms(shelterId: string): Promise<ShutdownResponse> {
+  const base = await getBaseUrl(shelterId)
+  const res = await fetch(`${base}/api/shutdown`, {
+    method: "POST",
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!res.ok) throw new Error(`Shutdown failed: ${res.status}`)
+  const data = await res.json()
+  clearLmsCache()
+  return data
+}
+
 export async function deleteCamera(
   shelterId: string,
   cameraId: string,
