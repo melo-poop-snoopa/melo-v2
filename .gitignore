@@ -7,3 +7,7 @@ node_modules/
 dist/
 .DS_Store
 *.egg-info/
+mediamtx
+yolov8n.pt
+assets/
+supabase/snippets/
