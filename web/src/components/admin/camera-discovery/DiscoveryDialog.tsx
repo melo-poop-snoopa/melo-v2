@@ -24,14 +24,14 @@ interface DiscoveryDialogProps {
 const STEP_TITLES: Record<DiscoveryStep, string> = {
   scan: "Add Camera",
   credentials: "Camera Credentials",
-  testing: "Testing & Saving...",
+  testing: "Testing & Saving",
   results: "Setup Complete",
 }
 
 const STEP_DESCRIPTIONS: Record<DiscoveryStep, string> = {
   scan: "Scan your network or add a camera manually.",
   credentials: "Enter the camera's ONVIF credentials.",
-  testing: "Validating connections and saving configuration.",
+  testing: "Testing connections and saving configuration.",
   results: "Review the results below.",
 }
 
@@ -64,7 +64,16 @@ export function DiscoveryDialog({ open, onOpenChange, onComplete }: DiscoveryDia
 
   const handleScanComplete = useCallback((cameras: DiscoveredCamera[]) => {
     setSelectedCameras(cameras)
-    setStep("credentials")
+    const allRtsp = cameras.every((c) => c.rtsp_url)
+    if (allRtsp) {
+      const names = new Map(
+        cameras.map((c) => [`${c.host}:${c.port}`, c.stream_name || `Camera ${c.host}`])
+      )
+      setStreamNames(names)
+      setStep("testing")
+    } else {
+      setStep("credentials")
+    }
   }, [])
 
   const handleCredentialsSubmit = (
