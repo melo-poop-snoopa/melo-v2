@@ -29,7 +29,7 @@ class Config:
     hls_output_dir: Path = field(default_factory=lambda: Path("./segments"))
     hls_video_codec: str = "libx264"
     hls_preset: str = "ultrafast"
-    hls_fps: int = 30
+    hls_fps: int = 15
 
     # Heartbeat
     heartbeat_interval: int = 15

@@ -98,6 +98,7 @@ class HLSPipeline:
             "-flags", "low_delay",
             "-rtsp_transport", "tcp",
             "-i", self._rtsp_url,
+            "-vf", "scale=1280:720",
             "-r", str(self._fps),
             "-c:v", self._video_codec,
             "-preset", self._preset,
