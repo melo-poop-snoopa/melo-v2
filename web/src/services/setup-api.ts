@@ -86,6 +86,20 @@ export async function testCamera(
   return res.json()
 }
 
+export async function testRtspUrl(
+  shelterId: string,
+  rtspUrl: string,
+): Promise<TestCameraResponse> {
+  const base = await getBaseUrl(shelterId)
+  const res = await fetch(`${base}/api/test-rtsp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rtsp_url: rtspUrl }),
+  })
+  if (!res.ok) throw new Error(`RTSP test failed: ${res.status}`)
+  return res.json()
+}
+
 export async function saveCamera(
   shelterId: string,
   params: {
@@ -95,6 +109,7 @@ export async function saveCamera(
     username: string
     password: string
     stream_name: string
+    rtsp_url?: string
   },
 ): Promise<SaveCameraResponse> {
   const base = await getBaseUrl(shelterId)

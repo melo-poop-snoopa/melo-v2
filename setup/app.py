@@ -78,13 +78,18 @@ class TestCameraResponse(BaseModel):
     error: str | None = None
 
 
+class TestRtspRequest(BaseModel):
+    rtsp_url: str
+
+
 class SaveCameraRequest(BaseModel):
     shelter_id: str
-    host: str
+    host: str = ""
     port: int = 80
     username: str = ""
     password: str = ""
     stream_name: str = "Camera"
+    rtsp_url: str | None = None
 
 
 class SaveCameraResponse(BaseModel):
@@ -137,12 +142,56 @@ async def test_camera(req: TestCameraRequest):
         return TestCameraResponse(success=False, error=str(exc))
 
 
+@app.post("/api/test-rtsp", response_model=TestCameraResponse)
+async def test_rtsp(req: TestRtspRequest):
+    """Probe an RTSP URL directly with ffprobe."""
+    import subprocess
+
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [
+                "ffprobe",
+                "-v", "error",
+                "-rtsp_transport", "tcp",
+                "-analyzeduration", "2000000",
+                "-probesize", "500000",
+                "-i", req.rtsp_url,
+                "-show_entries", "stream=codec_type",
+                "-of", "csv=p=0",
+            ],
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return TestCameraResponse(success=True, rtsp_url=req.rtsp_url)
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        return TestCameraResponse(
+            success=False,
+            error=stderr or "ffprobe could not open the stream",
+        )
+    except subprocess.TimeoutExpired:
+        return TestCameraResponse(success=False, error="Connection timed out")
+    except FileNotFoundError:
+        return TestCameraResponse(success=False, error="ffprobe not found on this system")
+    except Exception as exc:
+        logger.warning("RTSP probe failed for %s: %s", req.rtsp_url, exc)
+        return TestCameraResponse(success=False, error=str(exc))
+
+
 @app.post("/api/cameras", response_model=SaveCameraResponse)
 async def save_camera(req: SaveCameraRequest):
     """Save a camera to Supabase: creates a stream + shelter_camera record."""
     client = _get_supabase()
     cfg = _get_config()
     local_dev = cfg.local_dev if cfg else os.environ.get("LOCAL_DEV", "").lower() in ("1", "true", "yes")
+
+    # For RTSP-only cameras, derive host from the URL if not provided
+    host = req.host
+    if not host and req.rtsp_url:
+        from urllib.parse import urlparse
+        parsed = urlparse(req.rtsp_url)
+        host = parsed.hostname or ""
 
     # Encrypt password
     if local_dev:
@@ -172,16 +221,20 @@ async def save_camera(req: SaveCameraRequest):
     stream_id = stream["id"]
 
     # Create shelter_camera record
+    camera_data = {
+        "shelter_id": req.shelter_id,
+        "stream_id": stream_id,
+        "ip_address": host,
+        "onvif_port": req.port,
+        "username": req.username,
+        "encrypted_secret": encrypted_secret,
+    }
+    if req.rtsp_url:
+        camera_data["rtsp_url"] = req.rtsp_url
+
     camera_result = (
         client.table("shelter_cameras")
-        .insert({
-            "shelter_id": req.shelter_id,
-            "stream_id": stream_id,
-            "ip_address": req.host,
-            "onvif_port": req.port,
-            "username": req.username,
-            "encrypted_secret": encrypted_secret,
-        })
+        .insert(camera_data)
         .execute()
     )
     camera = camera_result.data[0]
@@ -195,13 +248,14 @@ async def save_camera(req: SaveCameraRequest):
     pipeline_mgr = _state.get("pipeline_manager")
     if pipeline_mgr:
         try:
-            # Re-read the camera row so the pipeline manager has the full record
             cam_row = client.table("shelter_cameras").select("*").eq("id", camera["id"]).single().execute().data
-            # Use the RTSP URL from the test step if available
-            test_result = await test_camera(TestCameraRequest(
-                host=req.host, port=req.port, username=req.username, password=req.password,
-            ))
-            rtsp_url = test_result.rtsp_url if test_result.success else None
+            if req.rtsp_url:
+                rtsp_url = req.rtsp_url
+            else:
+                test_result = await test_camera(TestCameraRequest(
+                    host=req.host, port=req.port, username=req.username, password=req.password,
+                ))
+                rtsp_url = test_result.rtsp_url if test_result.success else None
             pipeline_mgr.start_camera(cam_row, rtsp_url=rtsp_url)
         except Exception:
             logger.warning("Hot-add failed for camera %s — will start on next LMS restart", camera["id"], exc_info=True)

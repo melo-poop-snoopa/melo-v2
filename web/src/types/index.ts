@@ -66,6 +66,8 @@ export interface DiscoveredCamera {
   port: number
   xaddrs: string
   device_uuid: string | null
+  rtsp_url?: string
+  stream_name?: string
 }
 
 export type DiscoveryStep = "scan" | "credentials" | "testing" | "results"

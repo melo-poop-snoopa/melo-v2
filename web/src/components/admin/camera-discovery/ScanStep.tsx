@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ArrowLeft, Camera, Loader2, Plus, Radar, WifiOff } from "lucide-react"
+import { ArrowLeft, Camera, Link, Loader2, Plus, Radar, WifiOff } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { discoverCameras } from "@/services/setup-api"
 import type { DiscoveredCamera } from "@/types"
@@ -15,7 +15,7 @@ interface ScanStepProps {
   onClose: () => void
 }
 
-type Mode = "chooser" | "scanning" | "manual"
+type Mode = "chooser" | "scanning" | "manual" | "rtsp"
 
 export function ScanStep({ shelterId, onComplete, onClose }: ScanStepProps) {
   const [mode, setMode] = useState<Mode>("chooser")
@@ -23,6 +23,8 @@ export function ScanStep({ shelterId, onComplete, onClose }: ScanStepProps) {
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
   const [manualHost, setManualHost] = useState("")
   const [manualPort, setManualPort] = useState("80")
+  const [rtspUrl, setRtspUrl] = useState("")
+  const [rtspStreamName, setRtspStreamName] = useState("")
 
   useEffect(() => {
     if (mode !== "scanning") return
@@ -64,6 +66,23 @@ export function ScanStep({ shelterId, onComplete, onClose }: ScanStepProps) {
     }])
   }
 
+  const submitRtsp = () => {
+    if (!rtspUrl.trim() || !rtspStreamName.trim()) return
+    let host = ""
+    try {
+      const parsed = new URL(rtspUrl.trim())
+      host = parsed.hostname
+    } catch { /* leave host empty — backend will parse */ }
+    onComplete([{
+      host,
+      port: 0,
+      xaddrs: "",
+      device_uuid: null,
+      rtsp_url: rtspUrl.trim(),
+      stream_name: rtspStreamName.trim(),
+    }])
+  }
+
   const selectedCameras = discovered?.filter((_, i) => selectedIndices.has(i)) ?? []
 
   if (mode === "chooser") {
@@ -101,8 +120,61 @@ export function ScanStep({ shelterId, onComplete, onClose }: ScanStepProps) {
           </div>
         </button>
 
+        <button
+          type="button"
+          onClick={() => setMode("rtsp")}
+          className="w-full rounded-lg bg-white/5 p-4 text-left transition hover:bg-white/10"
+        >
+          <div className="flex items-center gap-3">
+            <Link className="h-5 w-5 text-melo-500" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-foreground">RTSP stream</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Paste a stream URL for non-ONVIF cameras (Tuya, Tapo, etc.).
+              </p>
+            </div>
+          </div>
+        </button>
+
         <Button variant="outline" className="w-full" onClick={onClose}>
           Cancel
+        </Button>
+      </div>
+    )
+  }
+
+  if (mode === "rtsp") {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 rounded-lg bg-white/5 p-4">
+          <div className="flex flex-col gap-2">
+            <Label className="text-xs text-muted-foreground">Stream Name</Label>
+            <Input
+              value={rtspStreamName}
+              onChange={(e) => setRtspStreamName(e.target.value)}
+              placeholder="e.g. Kitten Room"
+              autoFocus
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label className="text-xs text-muted-foreground">RTSP URL</Label>
+            <Input
+              value={rtspUrl}
+              onChange={(e) => setRtspUrl(e.target.value)}
+              placeholder="rtsp://user:pass@192.168.1.50:8554/stream0"
+              className="font-mono text-xs"
+            />
+          </div>
+          <Button
+            className="w-full bg-melo-500 text-white hover:bg-melo-600"
+            onClick={submitRtsp}
+            disabled={!rtspUrl.trim() || !rtspStreamName.trim()}
+          >
+            Continue
+          </Button>
+        </div>
+        <Button variant="ghost" className="w-full" onClick={() => setMode("chooser")}>
+          <ArrowLeft className="h-3 w-3 mr-1" /> Back
         </Button>
       </div>
     )

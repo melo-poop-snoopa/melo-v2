@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { Check, X } from "lucide-react"
+import { AlertTriangle, Check, X } from "lucide-react"
 import type { TestResult } from "./TestStep"
 
 interface ResultsStepProps {
@@ -10,16 +10,17 @@ interface ResultsStepProps {
 }
 
 export function ResultsStep({ results, onDone }: ResultsStepProps) {
-  const succeeded = results.filter((r) => r.success)
+  const succeeded = results.filter((r) => r.success && !r.warning)
+  const warned = results.filter((r) => r.success && r.warning)
   const failed = results.filter((r) => !r.success)
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        {succeeded.length > 0 ? (
+        {succeeded.length + warned.length > 0 ? (
           <>
-            <span className="text-foreground font-medium">{succeeded.length}</span>{" "}
-            camera{succeeded.length !== 1 ? "s" : ""} saved and streaming.
+            <span className="text-foreground font-medium">{succeeded.length + warned.length}</span>{" "}
+            camera{succeeded.length + warned.length !== 1 ? "s" : ""} saved.
           </>
         ) : (
           <>
@@ -59,6 +60,40 @@ export function ResultsStep({ results, onDone }: ResultsStepProps) {
             </div>
           )}
         </div>
+
+        {warned.length > 0 && (
+          <>
+            <Separator />
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                <span className="text-sm font-medium text-amber-500">Saved — stream not yet reachable</span>
+                <Badge
+                  variant="outline"
+                  className="ml-auto text-[10px] bg-amber-500/10 text-amber-500 border-amber-500/30"
+                >
+                  {warned.length}
+                </Badge>
+              </div>
+              <div className="flex flex-col gap-1">
+                {warned.map((r) => (
+                  <div
+                    key={`${r.camera.host}:${r.camera.port}`}
+                    className="flex items-center justify-between rounded px-2 py-1 text-xs"
+                  >
+                    <span className="text-foreground">{r.streamName}</span>
+                    <span className="text-amber-400 truncate ml-2 max-w-[200px]">
+                      {r.warning}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                The camera will connect automatically once it's powered on and on the network.
+              </p>
+            </div>
+          </>
+        )}
 
         {failed.length > 0 && (
           <>
