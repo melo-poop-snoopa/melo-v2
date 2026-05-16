@@ -179,12 +179,19 @@ class PipelineManager:
         try:
             url = get_stream_uri(ip, port, username, password)
             return url
-        except Exception:
-            logger.warning("ONVIF failed at stored IP %s:%d for camera %s", ip, port, cam_row["id"])
+        except Exception as exc:
+            logger.warning(
+                "Camera %s not reachable at %s:%d — %s. Attempting auto-rediscovery...",
+                cam_row["id"], ip, port, type(exc).__name__,
+            )
 
         new_ip = self._rediscover_by_uuid(cam_row)
         if not new_ip or new_ip == ip:
-            logger.error("Could not rediscover camera %s", cam_row["id"])
+            logger.error(
+                "Camera %s not detected on the network. "
+                "Ensure the camera is powered on and connected to the same LAN as this device.",
+                cam_row["id"],
+            )
             del password
             return None
 
@@ -193,10 +200,16 @@ class PipelineManager:
             self._db.client.table("shelter_cameras").update(
                 {"ip_address": new_ip}
             ).eq("id", cam_row["id"]).execute()
-            logger.info("Camera %s rediscovered at %s (was %s)", cam_row["id"], new_ip, ip)
+            logger.info(
+                "Camera %s found at new IP %s (was %s) — reconnected successfully.",
+                cam_row["id"], new_ip, ip,
+            )
             return url
-        except Exception:
-            logger.exception("ONVIF failed at rediscovered IP %s for camera %s", new_ip, cam_row["id"])
+        except Exception as exc:
+            logger.error(
+                "Camera %s found at %s but connection failed — %s: %s",
+                cam_row["id"], new_ip, type(exc).__name__, exc,
+            )
             return None
         finally:
             del password
@@ -219,18 +232,32 @@ class PipelineManager:
         """Run WS-Discovery and match by device_uuid to find a camera's new IP."""
         device_uuid = cam_row.get("device_uuid")
         if not device_uuid:
-            logger.info("No device_uuid stored for camera %s, cannot rediscover", cam_row["id"])
+            logger.warning(
+                "Camera %s has no device_uuid stored — cannot auto-rediscover. "
+                "Re-add the camera via the setup page to enable auto-rediscovery.",
+                cam_row["id"],
+            )
             return None
 
-        logger.info("Running WS-Discovery to rediscover camera %s (uuid=%s)", cam_row["id"], device_uuid)
+        logger.info("Scanning network for camera %s...", cam_row["id"])
         cameras = discover_onvif_cameras(timeout=5.0)
 
         for cam in cameras:
             if cam.device_uuid and cam.device_uuid == device_uuid:
-                logger.info("Matched device_uuid %s → %s:%d", device_uuid, cam.host, cam.port)
+                logger.info("Camera %s found at %s (auto-rediscovered)", cam_row["id"], cam.host)
                 return cam.host
 
-        logger.warning("WS-Discovery found %d camera(s) but none matched uuid %s", len(cameras), device_uuid)
+        if cameras:
+            logger.warning(
+                "Found %d camera(s) on the network but none matched camera %s. "
+                "The camera may be offline or on a different subnet.",
+                len(cameras), cam_row["id"],
+            )
+        else:
+            logger.warning(
+                "No cameras found on the network. "
+                "Check that the camera is powered on and connected via Ethernet/WiFi.",
+            )
         return None
 
 
