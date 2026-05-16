@@ -92,6 +92,7 @@ class SaveCameraRequest(BaseModel):
     password: str = ""
     stream_name: str = "Camera"
     rtsp_url: str | None = None
+    device_uuid: str | None = None
 
 
 class SaveCameraResponse(BaseModel):
@@ -238,6 +239,8 @@ async def save_camera(req: SaveCameraRequest):
     }
     if req.rtsp_url:
         camera_data["rtsp_url"] = req.rtsp_url
+    if req.device_uuid:
+        camera_data["device_uuid"] = req.device_uuid
 
     camera_result = (
         client.table("shelter_cameras")
