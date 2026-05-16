@@ -72,6 +72,7 @@ export function TestStep({
           password,
           stream_name: streamName,
           rtsp_url: cam.rtsp_url,
+          device_uuid: cam.device_uuid ?? undefined,
         })
 
         const result: TestResult = {

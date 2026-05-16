@@ -23,6 +23,7 @@ from lms.r2_uploader import R2Uploader
 from lms.registry import Camera, CameraStatus, registry
 from lms.segment_cleanup import SegmentCleanup
 from lms.thumbnail_capture import ThumbnailCapture
+from setup.discovery import discover_onvif_cameras
 
 logger = logging.getLogger(__name__)
 
@@ -167,31 +168,70 @@ class PipelineManager:
         if cam_row.get("rtsp_url"):
             return cam_row["rtsp_url"]
 
-        encrypted = cam_row.get("encrypted_secret")
+        password = self._decrypt_password(cam_row)
+        if password is None:
+            return None
+
         username = cam_row.get("username", "admin")
-        if encrypted and self._kms:
-            password = self._kms.decrypt(encrypted)
-        elif cfg.local_dev:
-            if encrypted and isinstance(encrypted, str) and encrypted.startswith("\\x"):
-                password = bytes.fromhex(encrypted[2:]).decode("utf-8")
-            elif encrypted:
-                password = str(encrypted)
-            else:
-                password = ""
-        else:
-            logger.warning("No encrypted secret for camera %s, skipping", cam_row["id"])
+        ip = cam_row["ip_address"]
+        port = cam_row.get("onvif_port", 80)
+
+        try:
+            url = get_stream_uri(ip, port, username, password)
+            return url
+        except Exception:
+            logger.warning("ONVIF failed at stored IP %s:%d for camera %s", ip, port, cam_row["id"])
+
+        new_ip = self._rediscover_by_uuid(cam_row)
+        if not new_ip or new_ip == ip:
+            logger.error("Could not rediscover camera %s", cam_row["id"])
+            del password
             return None
 
         try:
-            url = get_stream_uri(
-                cam_row["ip_address"], cam_row.get("onvif_port", 80), username, password
-            )
-            del password
+            url = get_stream_uri(new_ip, port, username, password)
+            self._db.client.table("shelter_cameras").update(
+                {"ip_address": new_ip}
+            ).eq("id", cam_row["id"]).execute()
+            logger.info("Camera %s rediscovered at %s (was %s)", cam_row["id"], new_ip, ip)
             return url
         except Exception:
-            logger.exception("ONVIF failed for camera %s", cam_row["id"])
-            del password
+            logger.exception("ONVIF failed at rediscovered IP %s for camera %s", new_ip, cam_row["id"])
             return None
+        finally:
+            del password
+
+    def _decrypt_password(self, cam_row: dict) -> str | None:
+        cfg = self._cfg
+        encrypted = cam_row.get("encrypted_secret")
+        if encrypted and self._kms:
+            return self._kms.decrypt(encrypted)
+        if cfg.local_dev:
+            if encrypted and isinstance(encrypted, str) and encrypted.startswith("\\x"):
+                return bytes.fromhex(encrypted[2:]).decode("utf-8")
+            if encrypted:
+                return str(encrypted)
+            return ""
+        logger.warning("No encrypted secret for camera %s, skipping", cam_row["id"])
+        return None
+
+    def _rediscover_by_uuid(self, cam_row: dict) -> str | None:
+        """Run WS-Discovery and match by device_uuid to find a camera's new IP."""
+        device_uuid = cam_row.get("device_uuid")
+        if not device_uuid:
+            logger.info("No device_uuid stored for camera %s, cannot rediscover", cam_row["id"])
+            return None
+
+        logger.info("Running WS-Discovery to rediscover camera %s (uuid=%s)", cam_row["id"], device_uuid)
+        cameras = discover_onvif_cameras(timeout=5.0)
+
+        for cam in cameras:
+            if cam.device_uuid and cam.device_uuid == device_uuid:
+                logger.info("Matched device_uuid %s → %s:%d", device_uuid, cam.host, cam.port)
+                return cam.host
+
+        logger.warning("WS-Discovery found %d camera(s) but none matched uuid %s", len(cameras), device_uuid)
+        return None
 
 
 class _CameraPipeline:

@@ -110,6 +110,7 @@ export async function saveCamera(
     password: string
     stream_name: string
     rtsp_url?: string
+    device_uuid?: string
   },
 ): Promise<SaveCameraResponse> {
   const base = await getBaseUrl(shelterId)
