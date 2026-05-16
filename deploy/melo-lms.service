@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=melo
-WorkingDirectory=/opt/melo
-EnvironmentFile=/opt/melo/.env
+User=melo-lms
+WorkingDirectory=/home/melo-lms/melo-v2
+EnvironmentFile=/home/melo-lms/melo-v2/.env
 ExecStart=/usr/local/bin/uv run lms
 Restart=on-failure
 RestartSec=10
