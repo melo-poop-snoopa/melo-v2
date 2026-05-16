@@ -21,12 +21,12 @@ class HLSPipeline:
         stream_id: str,
         rtsp_url: str,
         output_dir: Path,
-        segment_duration: int = 2,
-        playlist_size: int = 5,
-        video_codec: str = "libx264",
+        segment_duration: int = 1,
+        playlist_size: int = 8,
+        video_codec: str = "copy",
         preset: str = "ultrafast",
         fps: int = 30,
-        video_bitrate: str = "800k",
+        video_bitrate: str = "1500k",
     ) -> None:
         self._stream_id = stream_id
         self._rtsp_url = rtsp_url
@@ -40,6 +40,7 @@ class HLSPipeline:
         self._process: subprocess.Popen[bytes] | None = None
         self._stop_event = threading.Event()
         self._watchdog_thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
 
     def start(self) -> None:
         if self._process and self._process.poll() is None:
@@ -92,26 +93,34 @@ class HLSPipeline:
         segment_pattern = str(self._output_dir / "seg_%05d.ts")
         playlist_path = str(self._output_dir / "stream.m3u8")
 
-        gop_size = self._segment_duration * self._fps
-
-        return [
+        cmd = [
             ffmpeg,
             "-fflags", "nobuffer",
             "-flags", "low_delay",
             "-rtsp_transport", "tcp",
             "-i", self._rtsp_url,
-            "-vf", "scale=1280:720",
-            "-r", str(self._fps),
-            "-c:v", self._video_codec,
-            "-preset", self._preset,
-            "-tune", "zerolatency",
-            "-b:v", self._video_bitrate,
-            "-maxrate", self._video_bitrate,
-            "-bufsize", self._video_bitrate,
-            "-g", str(gop_size),
-            "-keyint_min", str(gop_size),
-            "-sc_threshold", "0",
-            "-force_key_frames", f"expr:gte(t,n_forced*{self._segment_duration})",
+        ]
+
+        if self._video_codec == "copy":
+            cmd += ["-c:v", "copy"]
+        else:
+            gop_size = self._segment_duration * self._fps
+            cmd += [
+                "-vf", "scale=1280:720",
+                "-r", str(self._fps),
+                "-c:v", self._video_codec,
+                "-preset", self._preset,
+                "-tune", "zerolatency",
+                "-b:v", self._video_bitrate,
+                "-maxrate", self._video_bitrate,
+                "-bufsize", self._video_bitrate,
+                "-g", str(gop_size),
+                "-keyint_min", str(gop_size),
+                "-sc_threshold", "0",
+                "-force_key_frames", f"expr:gte(t,n_forced*{self._segment_duration})",
+            ]
+
+        cmd += [
             "-an",
             "-f", "hls",
             "-hls_time", str(self._segment_duration),
@@ -120,14 +129,32 @@ class HLSPipeline:
             "-hls_segment_filename", segment_pattern,
             playlist_path,
         ]
+        return cmd
 
     def _spawn(self) -> None:
         cmd = self._build_ffmpeg_cmd()
         self._process = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
+        self._stderr_thread = threading.Thread(
+            target=self._read_stderr, daemon=True, name=f"ffmpeg-stderr-{self._stream_id}"
+        )
+        self._stderr_thread.start()
+
+    def _read_stderr(self) -> None:
+        proc = self._process
+        if not proc or not proc.stderr:
+            return
+        for raw_line in proc.stderr:
+            line = raw_line.decode("utf-8", errors="replace").rstrip()
+            if not line:
+                continue
+            if any(k in line.lower() for k in ("error", "dropping", "timeout", "overread")):
+                logger.warning("[ffmpeg:%s] %s", self._stream_id, line)
+            else:
+                logger.debug("[ffmpeg:%s] %s", self._stream_id, line)
 
     def _watchdog(self) -> None:
         from lms.reconnect import reconnect_with_backoff

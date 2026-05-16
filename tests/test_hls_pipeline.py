@@ -37,7 +37,7 @@ def test_build_ffmpeg_cmd(pipeline: HLSPipeline) -> None:
     assert "-hls_list_size" in cmd
     assert "5" in cmd
     assert "-hls_flags" in cmd
-    assert "delete_segments+append_list" in cmd
+    assert "append_list+delete_segments" in cmd
 
     assert cmd[-1].endswith("stream.m3u8")
     seg_idx = cmd.index("-hls_segment_filename") + 1

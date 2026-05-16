@@ -1,9 +1,13 @@
 """
 Background uploader: watches a segment directory and pushes new .ts/.m3u8 files to Cloudflare R2.
+
+Uses inotify on Linux (Raspberry Pi) for instant segment detection, falls back to
+polling on other platforms (macOS dev).
 """
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,8 +19,17 @@ import botocore.exceptions
 
 logger = logging.getLogger(__name__)
 
-_POLL_INTERVAL = 0.5
+_POLL_INTERVAL = 0.3  # fallback polling (macOS only)
 _CLEANUP_AGE = 300  # 5 minutes
+
+try:
+    if sys.platform == "linux":
+        from inotify_simple import INotify, flags as inotify_flags
+        _HAS_INOTIFY = True
+    else:
+        _HAS_INOTIFY = False
+except ImportError:
+    _HAS_INOTIFY = False
 
 _CONTENT_TYPES = {
     ".ts": "video/MP2T",
@@ -97,6 +110,33 @@ class R2Uploader:
             logger.exception("Failed to clear remote segments for stream %s", self._stream_id)
 
     def _upload_loop(self) -> None:
+        if _HAS_INOTIFY:
+            self._upload_loop_inotify()
+        else:
+            self._upload_loop_poll()
+
+    def _upload_loop_inotify(self) -> None:
+        inotify = INotify()
+        watch_flags = inotify_flags.CLOSE_WRITE | inotify_flags.MOVED_TO
+        self._segment_dir.mkdir(parents=True, exist_ok=True)
+        wd = inotify.add_watch(str(self._segment_dir), watch_flags)
+        logger.info("Using inotify for segment detection (stream %s)", self._stream_id)
+
+        try:
+            while not self._stop_event.is_set():
+                events = inotify.read(timeout=1000)
+                if self._stop_event.is_set():
+                    break
+                if events:
+                    try:
+                        self._upload_new_files()
+                        self._cleanup_old_segments()
+                    except Exception:
+                        logger.exception("R2 upload error for stream %s", self._stream_id)
+        finally:
+            inotify.close()
+
+    def _upload_loop_poll(self) -> None:
         while not self._stop_event.is_set():
             try:
                 self._upload_new_files()
@@ -211,13 +251,16 @@ class R2Uploader:
 
         content_type = _CONTENT_TYPES[path.suffix]
         key = f"{self._prefix}/{path.name}"
+        extra_args: dict = {"ContentType": content_type}
+        if path.suffix == ".ts":
+            extra_args["CacheControl"] = "public, max-age=60"
 
         try:
             self._s3.upload_file(
                 str(path),
                 self._bucket,
                 key,
-                ExtraArgs={"ContentType": content_type},
+                ExtraArgs=extra_args,
             )
             return True
         except (FileNotFoundError, OSError, botocore.exceptions.UnseekableStreamError):

@@ -35,7 +35,7 @@ def test_upload_new_segments(
         str(tmp_segments / "seg_00001.ts"),
         "test-bucket",
         "live-segments/test-stream/seg_00001.ts",
-        ExtraArgs={"ContentType": "video/MP2T"},
+        ExtraArgs={"ContentType": "video/MP2T", "CacheControl": "public, max-age=60"},
     )
     assert uploader.last_upload_time > 0
 
