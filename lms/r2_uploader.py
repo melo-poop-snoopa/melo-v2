@@ -298,7 +298,9 @@ class R2Uploader:
             return
 
         now = time.time()
+        current_files: set[str] = set()
         for path in self._segment_dir.iterdir():
+            current_files.add(path.name)
             try:
                 stale = path.suffix == ".ts" and (now - path.stat().st_mtime) > _CLEANUP_AGE
             except FileNotFoundError:
@@ -307,3 +309,7 @@ class R2Uploader:
                 path.unlink(missing_ok=True)
                 self._uploaded.discard(path.name)
                 logger.info("Deleted stale local segment %s", path.name)
+
+        stale_names = self._uploaded - current_files
+        if stale_names:
+            self._uploaded -= stale_names

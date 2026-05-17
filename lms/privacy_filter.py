@@ -7,6 +7,7 @@ the heartbeat manager writes to Supabase as ``privacy_active``.
 """
 from __future__ import annotations
 
+import gc
 import logging
 import threading
 import time
@@ -17,6 +18,8 @@ _DETECT_FPS = 2
 _FRAME_INTERVAL = 1.0 / _DETECT_FPS
 _ACTIVATION_FRAMES = _DETECT_FPS * 5   # 5 seconds of sustained detection before activating
 _DEACTIVATION_FRAMES = _DETECT_FPS * 25  # counter ceiling; clears after this many missed frames
+_CONTAINER_RESTART_INTERVAL = 1800  # reopen RTSP every 30min to flush FFmpeg internal buffers
+_GC_EVERY_N_FRAMES = 500
 
 
 class PrivacyFilter:
@@ -89,8 +92,14 @@ class PrivacyFilter:
 
             frame_count = 0
             next_at = time.monotonic()
+            container_opened_at = time.monotonic()
+
             for frame in container.decode(video=0):
                 if self._stop_event.is_set():
+                    break
+
+                if time.monotonic() - container_opened_at > _CONTAINER_RESTART_INTERVAL:
+                    logger.info("Stream %s: restarting RTSP container to reclaim memory", self._stream_id)
                     break
 
                 now = time.monotonic()
@@ -150,6 +159,11 @@ class PrivacyFilter:
                     elif self._consecutive_detections == 0 and self._human_detected:
                         logger.info("Stream %s: human_detected → False", self._stream_id)
                         self._human_detected = False
+
+                del results
+                del img
+                if frame_count % _GC_EVERY_N_FRAMES == 0:
+                    gc.collect()
         finally:
             container.close()
 

@@ -157,17 +157,26 @@ def main() -> None:
 
     process_start = time.time()
 
+    def _get_current_rss_mb() -> float:
+        if sys.platform == "linux":
+            try:
+                with open("/proc/self/status") as f:
+                    for line in f:
+                        if line.startswith("VmRSS:"):
+                            return int(line.split()[1]) / 1024
+            except (FileNotFoundError, ValueError):
+                pass
+        rusage = resource.getrusage(resource.RUSAGE_SELF)
+        if sys.platform == "linux":
+            return rusage.ru_maxrss / 1024
+        return rusage.ru_maxrss / (1024 * 1024)
+
     def _process_heartbeat():
         while not stop.is_set():
             stop.wait(300)
             if stop.is_set():
                 break
-            rusage = resource.getrusage(resource.RUSAGE_SELF)
-            rss_mb = rusage.ru_maxrss / 1024  # macOS returns bytes, Linux returns KB
-            if sys.platform == "linux":
-                rss_mb = rusage.ru_maxrss / 1024
-            else:
-                rss_mb = rusage.ru_maxrss / (1024 * 1024)
+            rss_mb = _get_current_rss_mb()
             logger.info(
                 "[process] pid=%d rss_mb=%.1f threads=%d uptime_min=%.0f",
                 os.getpid(), rss_mb, threading.active_count(),
