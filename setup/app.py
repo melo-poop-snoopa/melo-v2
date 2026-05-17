@@ -242,11 +242,17 @@ async def save_camera(req: SaveCameraRequest):
     if req.device_uuid:
         camera_data["device_uuid"] = req.device_uuid
 
-    camera_result = (
-        client.table("shelter_cameras")
-        .insert(camera_data)
-        .execute()
-    )
+    try:
+        camera_result = (
+            client.table("shelter_cameras")
+            .insert(camera_data)
+            .execute()
+        )
+    except Exception:
+        # Rollback: delete the orphaned stream
+        client.table("streams").delete().eq("id", stream_id).execute()
+        raise
+
     camera = camera_result.data[0]
 
     logger.info(
