@@ -147,6 +147,10 @@ class PipelineManager:
         logger.info("Started pipeline for stream %s (camera %s)", stream_id, cam_uuid)
         return True
 
+    def is_active(self, stream_id: str) -> bool:
+        with self._lock:
+            return stream_id in self._active
+
     def stop_camera(self, stream_id: str) -> None:
         with self._lock:
             cam_pipeline = self._active.pop(stream_id, None)

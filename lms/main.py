@@ -137,7 +137,9 @@ def main() -> None:
     logger.info("Found %d camera(s) for shelter %s", len(cameras), cfg.shelter_id)
 
     for cam_row in cameras:
-        pipeline_mgr.start_camera(cam_row)
+        stream_id = cam_row.get("stream_id") or cam_row["id"]
+        if not pipeline_mgr.start_camera(cam_row):
+            db.set_stream_status(stream_id, "offline")
 
     heartbeat.start()
     cleanup.start()
@@ -184,6 +186,28 @@ def main() -> None:
             )
 
     threading.Thread(target=_process_heartbeat, daemon=True, name="process-heartbeat").start()
+
+    def _roaming_scan():
+        """Periodically retry cameras that aren't currently streaming."""
+        while not stop.is_set():
+            stop.wait(60)
+            if stop.is_set():
+                break
+            try:
+                all_cameras = db.get_cameras_for_shelter(cfg.shelter_id)
+                for cam_row in all_cameras:
+                    stream_id = cam_row.get("stream_id") or cam_row["id"]
+                    if pipeline_mgr.is_active(stream_id):
+                        continue
+                    logger.info("[roaming] Retrying camera %s...", cam_row["id"])
+                    if pipeline_mgr.start_camera(cam_row):
+                        logger.info("[roaming] Camera %s is now live", cam_row["id"])
+                    else:
+                        db.set_stream_status(stream_id, "offline")
+            except Exception:
+                logger.exception("[roaming] Scan error")
+
+    threading.Thread(target=_roaming_scan, daemon=True, name="roaming-scan").start()
 
     logger.info("LMS running — setup API on :8000")
     stop.wait()
