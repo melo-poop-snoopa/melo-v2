@@ -41,6 +41,9 @@ class HLSPipeline:
         self._stop_event = threading.Event()
         self._watchdog_thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
+        self._watchdog_last_report: float = 0.0
+        self._stall_count: int = 0
+        self._restart_count: int = 0
 
     def start(self) -> None:
         if self._process and self._process.poll() is None:
@@ -175,8 +178,9 @@ class HLSPipeline:
                 stream_id=self._stream_id,
                 attempt_fn=self._try_restart,
                 stop_fn=self._stop_event.is_set,
-                on_failure=lambda: logger.error(
-                    "Stream %s: permanent reconnect failure", self._stream_id
+                on_failure=lambda: logger.critical(
+                    "PERMANENT FAILURE: stream %s exhausted all reconnect attempts. "
+                    "Manual intervention required.", self._stream_id
                 ),
             )
 
@@ -200,6 +204,7 @@ class HLSPipeline:
                 if stall_since is None:
                     stall_since = time.time()
                 elif time.time() - stall_since > _STALL_TIMEOUT:
+                    self._stall_count += 1
                     logger.warning(
                         "FFmpeg stalled for stream %s (no new segment in %ds) — killing",
                         self._stream_id, _STALL_TIMEOUT,
@@ -208,15 +213,26 @@ class HLSPipeline:
                     self._process.wait(timeout=5)
                     return
 
+            now = time.time()
+            if now - self._watchdog_last_report > 300:
+                self._watchdog_last_report = now
+                logger.info(
+                    "[watchdog] stream=%s ffmpeg_pid=%d stalls=%d restarts=%d",
+                    self._stream_id,
+                    self._process.pid if self._process else 0,
+                    self._stall_count,
+                    self._restart_count,
+                )
+
     def _try_restart(self) -> bool:
         try:
             self._spawn()
-            # Give FFmpeg 2s to either connect or immediately fail
             try:
                 self._process.wait(timeout=2)
-                return False  # exited quickly — retry
+                return False
             except subprocess.TimeoutExpired:
-                return True   # still running — success
+                self._restart_count += 1
+                return True
         except Exception:
             logger.exception("Restart failed for stream %s", self._stream_id)
             return False

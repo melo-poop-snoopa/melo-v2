@@ -68,6 +68,10 @@ class R2Uploader:
         self._thread: threading.Thread | None = None
         self._last_upload_time: float = 0.0
         self._upload_count: int = 0
+        self._start_time: float = 0.0
+        self._last_summary_time: float = 0.0
+        self._uploads_since_summary: int = 0
+        self._errors_since_summary: int = 0
         self._upload_pool = ThreadPoolExecutor(
             max_workers=3, thread_name_prefix=f"r2-worker-{stream_id}"
         )
@@ -77,6 +81,10 @@ class R2Uploader:
         self._uploaded.clear()
         self._lost_segments.clear()
         self._upload_count = 0
+        self._start_time = time.time()
+        self._last_summary_time = time.time()
+        self._uploads_since_summary = 0
+        self._errors_since_summary = 0
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._upload_loop, daemon=True, name=f"r2-upload-{self._stream_id}"
@@ -132,6 +140,7 @@ class R2Uploader:
                         self._upload_new_files()
                         self._cleanup_old_segments()
                     except Exception:
+                        self._errors_since_summary += 1
                         logger.exception("R2 upload error for stream %s", self._stream_id)
         finally:
             inotify.close()
@@ -142,6 +151,7 @@ class R2Uploader:
                 self._upload_new_files()
                 self._cleanup_old_segments()
             except Exception:
+                self._errors_since_summary += 1
                 logger.exception("R2 upload error for stream %s", self._stream_id)
             self._stop_event.wait(_POLL_INTERVAL)
 
@@ -163,21 +173,37 @@ class R2Uploader:
                 try:
                     f.result()
                 except Exception:
+                    self._errors_since_summary += 1
                     logger.exception("Segment upload failed for stream %s", self._stream_id)
 
         for path in playlists:
             self._upload_playlist(path)
 
     def _upload_segment(self, path: Path) -> None:
-        content_type = _CONTENT_TYPES[".ts"]
-        key = f"{self._prefix}/{path.name}"
-
         if not self._put_file(path):
             return
         self._uploaded.add(path.name)
         self._upload_count += 1
+        self._uploads_since_summary += 1
         self._last_upload_time = time.time()
-        logger.info("Uploaded %s → %s", path.name, key)
+        logger.debug("Uploaded %s → %s/%s", path.name, self._prefix, path.name)
+        self._maybe_emit_summary()
+
+    def _maybe_emit_summary(self) -> None:
+        now = time.time()
+        if now - self._last_summary_time < 300:
+            return
+        self._last_summary_time = now
+        upload_ago = now - self._last_upload_time if self._last_upload_time else -1
+        logger.info(
+            "[summary] stream=%s total_uploaded=%d since_last_summary=%d errors=%d "
+            "uptime=%.0fm last_upload_ago=%.0fs",
+            self._stream_id, self._upload_count, self._uploads_since_summary,
+            self._errors_since_summary,
+            (now - self._start_time) / 60, upload_ago,
+        )
+        self._uploads_since_summary = 0
+        self._errors_since_summary = 0
 
     @staticmethod
     def _parse_m3u8_segments(m3u8_text: str) -> set[str]:

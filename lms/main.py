@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
+import resource
 import signal
+import sys
 import threading
+import time
 from pathlib import Path
 
 import boto3
@@ -150,6 +154,27 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+
+    process_start = time.time()
+
+    def _process_heartbeat():
+        while not stop.is_set():
+            stop.wait(300)
+            if stop.is_set():
+                break
+            rusage = resource.getrusage(resource.RUSAGE_SELF)
+            rss_mb = rusage.ru_maxrss / 1024  # macOS returns bytes, Linux returns KB
+            if sys.platform == "linux":
+                rss_mb = rusage.ru_maxrss / 1024
+            else:
+                rss_mb = rusage.ru_maxrss / (1024 * 1024)
+            logger.info(
+                "[process] pid=%d rss_mb=%.1f threads=%d uptime_min=%.0f",
+                os.getpid(), rss_mb, threading.active_count(),
+                (time.time() - process_start) / 60,
+            )
+
+    threading.Thread(target=_process_heartbeat, daemon=True, name="process-heartbeat").start()
 
     logger.info("LMS running — setup API on :8000")
     stop.wait()

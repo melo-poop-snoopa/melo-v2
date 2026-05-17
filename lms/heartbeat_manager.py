@@ -32,6 +32,10 @@ class HeartbeatManager:
         self._streams: dict[str, tuple[HLSPipeline, R2Uploader, PrivacyFilter | None]] = {}
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._tick_count: int = 0
+        self._last_status: dict[str, bool] = {}
+        self._start_time: float = time.time()
+        self._summary_interval_ticks: int = max(1, 300 // interval)
 
     def register(
         self,
@@ -74,8 +78,20 @@ class HeartbeatManager:
         alive = pipeline.is_alive()
         recent_upload = (time.time() - uploader.last_upload_time) < _UPLOAD_STALE_THRESHOLD
         enough_segments = uploader.upload_count >= _MIN_SEGMENTS_FOR_LIVE
+        healthy = alive and recent_upload and enough_segments
 
-        if alive and recent_upload and enough_segments:
+        was_healthy = self._last_status.get(stream_id)
+        if was_healthy is not None and healthy != was_healthy:
+            logger.warning(
+                "[transition] stream=%s %s → %s (alive=%s upload_recent=%s segments=%d)",
+                stream_id,
+                "healthy" if was_healthy else "unhealthy",
+                "healthy" if healthy else "unhealthy",
+                alive, recent_upload, uploader.upload_count,
+            )
+        self._last_status[stream_id] = healthy
+
+        if healthy:
             privacy_active = bool(privacy_filter and privacy_filter.is_human_detected())
             self._db.update_heartbeat(stream_id, privacy_active=privacy_active)
         else:
@@ -84,3 +100,15 @@ class HeartbeatManager:
                 stream_id, alive, recent_upload, uploader.upload_count,
             )
             self._db.set_stream_status(stream_id, "offline")
+
+        self._tick_count += 1
+        if self._tick_count % self._summary_interval_ticks == 0:
+            upload_ago = time.time() - uploader.last_upload_time if uploader.last_upload_time else -1
+            logger.info(
+                "[summary] stream=%s uptime=%.0fm healthy=%s segments=%d last_upload_ago=%.0fs",
+                stream_id,
+                (time.time() - self._start_time) / 60,
+                healthy,
+                uploader.upload_count,
+                upload_ago,
+            )
