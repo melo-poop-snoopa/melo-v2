@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useAuthStore } from "@/store/auth-store"
+import { useStreamStore } from "@/store/stream-store"
 import { supabase } from "@/services/supabase"
 import { checkSetupHealth, deleteCamera } from "@/services/setup-api"
 import { DiscoveryDialog } from "@/components/admin/camera-discovery/DiscoveryDialog"
@@ -21,12 +22,25 @@ import { toast, Toaster } from "sonner"
 
 export default function CamerasPage() {
   const { shelterId } = useAuthStore()
+  const { streams: storeStreams, subscribe } = useStreamStore()
   const [cameras, setCameras] = useState<(ShelterCamera & { stream?: Stream })[]>([])
   const [loading, setLoading] = useState(true)
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
   const [setupOnline, setSetupOnline] = useState<boolean | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<(ShelterCamera & { stream?: Stream }) | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  useEffect(() => subscribe(), [subscribe])
+
+  useEffect(() => {
+    if (storeStreams.length === 0) return
+    setCameras((prev) =>
+      prev.map((cam) => {
+        const updated = cam.stream_id ? storeStreams.find((s) => s.id === cam.stream_id) : undefined
+        return updated ? { ...cam, stream: updated } : cam
+      })
+    )
+  }, [storeStreams])
 
   const fetchCameras = async () => {
     if (!shelterId) return
