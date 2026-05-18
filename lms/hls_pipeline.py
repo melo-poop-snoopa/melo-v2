@@ -86,7 +86,13 @@ class HLSPipeline:
         segments = list(self._output_dir.glob("*.ts"))
         if not segments:
             return None
-        return max(s.stat().st_mtime for s in segments)
+        newest = 0.0
+        for s in segments:
+            try:
+                newest = max(newest, s.stat().st_mtime)
+            except FileNotFoundError:
+                continue
+        return newest or None
 
     def _build_ffmpeg_cmd(self) -> list[str]:
         ffmpeg = shutil.which("ffmpeg")

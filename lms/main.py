@@ -178,12 +178,15 @@ def main() -> None:
             stop.wait(300)
             if stop.is_set():
                 break
-            rss_mb = _get_current_rss_mb()
-            logger.info(
-                "[process] pid=%d rss_mb=%.1f threads=%d uptime_min=%.0f",
-                os.getpid(), rss_mb, threading.active_count(),
-                (time.time() - process_start) / 60,
-            )
+            try:
+                rss_mb = _get_current_rss_mb()
+                logger.info(
+                    "[process] pid=%d rss_mb=%.1f threads=%d uptime_min=%.0f",
+                    os.getpid(), rss_mb, threading.active_count(),
+                    (time.time() - process_start) / 60,
+                )
+            except Exception:
+                logger.exception("[process] heartbeat failed")
 
     threading.Thread(target=_process_heartbeat, daemon=True, name="process-heartbeat").start()
 
