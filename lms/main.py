@@ -224,5 +224,4 @@ def main() -> None:
     logger.info("LMS process exiting.")
 
     # Force exit — uvicorn's daemon thread would otherwise keep the process alive
-    import os
     os._exit(0)
