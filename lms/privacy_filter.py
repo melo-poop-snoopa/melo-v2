@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 _DETECT_FPS = 2
 _FRAME_INTERVAL = 1.0 / _DETECT_FPS
-_ACTIVATION_FRAMES = _DETECT_FPS * 5   # 5 seconds of sustained detection before activating
+_ACTIVATION_FRAMES = 3                  # ~1.5s of sustained detection before activating
 _DEACTIVATION_FRAMES = _DETECT_FPS * 25  # counter ceiling; clears after this many missed frames
 _CONTAINER_RESTART_INTERVAL = 1800  # reopen RTSP every 30min to flush FFmpeg internal buffers
 _GC_EVERY_N_FRAMES = 500
