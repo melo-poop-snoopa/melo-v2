@@ -6,6 +6,7 @@ segments/
 node_modules/
 dist/
 .DS_Store
+.claude/
 *.egg-info/
 mediamtx
 yolov8n.pt
