@@ -60,7 +60,12 @@ def test_no_duplicate_uploads(
 def test_m3u8_always_reuploaded(
     uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
 ) -> None:
-    (tmp_segments / "stream.m3u8").write_text("#EXTM3U\n")
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
 
     uploader._upload_new_files()
     mock_s3_client.put_object.reset_mock()
@@ -109,7 +114,12 @@ def test_content_type_ts(
 def test_content_type_m3u8(
     uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
 ) -> None:
-    (tmp_segments / "stream.m3u8").write_text("#EXTM3U\n")
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
 
     uploader._upload_new_files()
 
@@ -326,6 +336,50 @@ def test_lost_segments_tracked_across_cycles(
         if "m3u8" in str(c)
     ]
     assert len(m3u8_puts) == 1
+
+
+def test_cleanup_deletes_r2_objects(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """Stale local segments should trigger R2 object deletion."""
+    seg = tmp_segments / "seg_00001.ts"
+    seg.write_bytes(b"\x00" * 100)
+    uploader._uploaded.add("seg_00001.ts")
+
+    import os
+    old_time = time.time() - 600
+    os.utime(seg, (old_time, old_time))
+
+    uploader._cleanup_old_segments()
+
+    mock_s3_client.delete_objects.assert_called_once_with(
+        Bucket="test-bucket",
+        Delete={"Objects": [{"Key": "live-segments/test-stream/seg_00001.ts"}]},
+    )
+
+
+def test_stale_names_deleted_from_r2(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """Segments in _uploaded but missing from disk should be deleted from R2."""
+    uploader._uploaded.add("seg_ghost.ts")
+
+    uploader._cleanup_old_segments()
+
+    mock_s3_client.delete_objects.assert_called_once_with(
+        Bucket="test-bucket",
+        Delete={"Objects": [{"Key": "live-segments/test-stream/seg_ghost.ts"}]},
+    )
+
+
+def test_r2_delete_failure_does_not_crash(
+    uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
+) -> None:
+    """R2 delete_objects failure should be logged but not crash the upload loop."""
+    mock_s3_client.delete_objects.side_effect = Exception("R2 down")
+    uploader._uploaded.add("seg_ghost.ts")
+
+    uploader._cleanup_old_segments()  # should not raise
 
 
 def test_playlist_deferred_with_mix_of_pending_and_lost(

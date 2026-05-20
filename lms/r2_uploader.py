@@ -20,7 +20,7 @@ import botocore.exceptions
 logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL = 0.3  # fallback polling (macOS only)
-_CLEANUP_AGE = 300  # 5 minutes
+_DEFAULT_CLEANUP_AGE = 300  # 5 minutes
 
 try:
     if sys.platform == "linux":
@@ -46,6 +46,7 @@ class R2Uploader:
         secret_access_key: str,
         stream_id: str,
         segment_dir: Path,
+        cleanup_age: int = _DEFAULT_CLEANUP_AGE,
     ) -> None:
         self._s3 = boto3.client(
             "s3",
@@ -62,7 +63,9 @@ class R2Uploader:
         self._stream_id = stream_id
         self._segment_dir = segment_dir
         self._prefix = f"live-segments/{stream_id}"
+        self._cleanup_age = cleanup_age
         self._uploaded: set[str] = set()
+        self._pending_r2_deletes: list[str] = []
         self._lost_segments: set[str] = set()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -79,6 +82,7 @@ class R2Uploader:
     def start(self) -> None:
         self._clear_remote()
         self._uploaded.clear()
+        self._pending_r2_deletes.clear()
         self._lost_segments.clear()
         self._upload_count = 0
         self._start_time = time.time()
@@ -241,9 +245,23 @@ class R2Uploader:
         """Rewrite the playlist to only reference segments already uploaded to R2.
 
         Truncates at the first non-uploaded segment, so the browser never gets
-        a 404 for a segment that hasn't been pushed yet. Returns None if no
-        segments are uploaded yet.
+        a 404 for a segment that hasn't been pushed yet.  Segments gone from
+        disk are "lost" — skip them.  Returns None if no segments are uploaded
+        yet or if any segment is still pending on disk.
         """
+        referenced = self._parse_m3u8_segments(raw)
+        has_pending = False
+        for name in referenced:
+            if name in self._uploaded or name in self._lost_segments:
+                continue
+            if (self._segment_dir / name).exists():
+                has_pending = True
+            else:
+                self._lost_segments.add(name)
+
+        if has_pending:
+            return None
+
         lines = raw.splitlines()
         output: list[str] = []
         pending_extinf: str | None = None
@@ -262,7 +280,7 @@ class R2Uploader:
                     pending_extinf = None
                     segment_count += 1
                 else:
-                    break
+                    pending_extinf = None
             else:
                 output.append(line)
 
@@ -302,14 +320,46 @@ class R2Uploader:
         for path in self._segment_dir.iterdir():
             current_files.add(path.name)
             try:
-                stale = path.suffix == ".ts" and (now - path.stat().st_mtime) > _CLEANUP_AGE
+                stale = path.suffix == ".ts" and (now - path.stat().st_mtime) > self._cleanup_age
             except FileNotFoundError:
                 continue
             if stale:
                 path.unlink(missing_ok=True)
-                self._uploaded.discard(path.name)
+                if path.name in self._uploaded:
+                    self._uploaded.discard(path.name)
+                    self._pending_r2_deletes.append(path.name)
                 logger.info("Deleted stale local segment %s", path.name)
 
         stale_names = self._uploaded - current_files
         if stale_names:
+            self._pending_r2_deletes.extend(stale_names)
             self._uploaded -= stale_names
+
+        self._flush_r2_deletes()
+
+    def _flush_r2_deletes(self) -> None:
+        if not self._pending_r2_deletes:
+            return
+        keys = [f"{self._prefix}/{name}" for name in self._pending_r2_deletes]
+        self._pending_r2_deletes.clear()
+        self._upload_pool.submit(self._delete_r2_objects, keys)
+
+    def _delete_r2_objects(self, keys: list[str]) -> None:
+        for i in range(0, len(keys), 1000):
+            batch = keys[i : i + 1000]
+            try:
+                self._s3.delete_objects(
+                    Bucket=self._bucket,
+                    Delete={"Objects": [{"Key": k} for k in batch]},
+                )
+                logger.info(
+                    "Deleted %d R2 segment(s) for stream %s",
+                    len(batch),
+                    self._stream_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to delete %d R2 segment(s) for stream %s",
+                    len(batch),
+                    self._stream_id,
+                )
