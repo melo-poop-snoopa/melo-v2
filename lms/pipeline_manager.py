@@ -108,6 +108,7 @@ class PipelineManager:
             secret_access_key=cfg.r2_secret_access_key,
             stream_id=stream_id,
             segment_dir=output_dir,
+            cleanup_age=cfg.r2_segment_retention,
         )
 
         pipeline.start()

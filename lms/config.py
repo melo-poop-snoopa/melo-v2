@@ -32,6 +32,8 @@ class Config:
     hls_fps: int = 30
     hls_video_bitrate: str = "1500k"
 
+    r2_segment_retention: int = 300
+
     # Heartbeat
     heartbeat_interval: int = 15
 
@@ -87,6 +89,7 @@ def load_config() -> Config:
         hls_preset=os.environ.get("HLS_PRESET", "ultrafast"),
         hls_fps=int(os.environ.get("HLS_FPS", "30")),
         hls_video_bitrate=os.environ.get("HLS_VIDEO_BITRATE", "1500k"),
+        r2_segment_retention=int(os.environ.get("R2_SEGMENT_RETENTION", "300")),
         heartbeat_interval=int(os.environ.get("HEARTBEAT_INTERVAL", "15")),
         privacy_filter_enabled=os.environ.get("PRIVACY_FILTER_ENABLED", "true").lower() not in ("0", "false", "no"),
         privacy_confidence_threshold=float(os.environ.get("PRIVACY_CONFIDENCE_THRESHOLD", "0.35")),
