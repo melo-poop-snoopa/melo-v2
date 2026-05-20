@@ -60,7 +60,12 @@ def test_no_duplicate_uploads(
 def test_m3u8_always_reuploaded(
     uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
 ) -> None:
-    (tmp_segments / "stream.m3u8").write_text("#EXTM3U\n")
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
 
     uploader._upload_new_files()
     mock_s3_client.put_object.reset_mock()
@@ -109,7 +114,12 @@ def test_content_type_ts(
 def test_content_type_m3u8(
     uploader: R2Uploader, tmp_segments: Path, mock_s3_client: MagicMock
 ) -> None:
-    (tmp_segments / "stream.m3u8").write_text("#EXTM3U\n")
+    m3u8_content = (
+        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\n"
+        "#EXTINF:2.0,\nseg_00001.ts\n"
+    )
+    (tmp_segments / "stream.m3u8").write_text(m3u8_content)
+    (tmp_segments / "seg_00001.ts").write_bytes(b"\x00" * 100)
 
     uploader._upload_new_files()
 

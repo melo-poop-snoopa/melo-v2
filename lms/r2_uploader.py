@@ -245,9 +245,23 @@ class R2Uploader:
         """Rewrite the playlist to only reference segments already uploaded to R2.
 
         Truncates at the first non-uploaded segment, so the browser never gets
-        a 404 for a segment that hasn't been pushed yet. Returns None if no
-        segments are uploaded yet.
+        a 404 for a segment that hasn't been pushed yet.  Segments gone from
+        disk are "lost" — skip them.  Returns None if no segments are uploaded
+        yet or if any segment is still pending on disk.
         """
+        referenced = self._parse_m3u8_segments(raw)
+        has_pending = False
+        for name in referenced:
+            if name in self._uploaded or name in self._lost_segments:
+                continue
+            if (self._segment_dir / name).exists():
+                has_pending = True
+            else:
+                self._lost_segments.add(name)
+
+        if has_pending:
+            return None
+
         lines = raw.splitlines()
         output: list[str] = []
         pending_extinf: str | None = None
@@ -266,7 +280,7 @@ class R2Uploader:
                     pending_extinf = None
                     segment_count += 1
                 else:
-                    break
+                    pending_extinf = None
             else:
                 output.append(line)
 
