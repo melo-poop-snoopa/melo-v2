@@ -65,6 +65,11 @@ def _start_setup_api(
     _state["cleanup"] = cleanup
     _state["file_handler"] = file_handler
     _state["session_log_path"] = session_log_path
+    _state["setup_api_token"] = os.environ.get("SETUP_API_TOKEN", "")
+    if _state["setup_api_token"]:
+        logger.info("Setup API token configured (%d chars)", len(_state["setup_api_token"]))
+    else:
+        logger.warning("SETUP_API_TOKEN not set — setup API endpoints are unauthenticated")
 
     def run():
         import uvicorn

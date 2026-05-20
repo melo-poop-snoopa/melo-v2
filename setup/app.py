@@ -46,7 +46,7 @@ _bearer = HTTPBearer(auto_error=False)
 async def _require_token(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> None:
-    token = os.environ.get("SETUP_API_TOKEN", "")
+    token = _state.get("setup_api_token") or os.environ.get("SETUP_API_TOKEN", "")
     if not token:
         return
     if not creds or not secrets.compare_digest(creds.credentials, token):
