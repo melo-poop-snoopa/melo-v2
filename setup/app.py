@@ -27,8 +27,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Melo Setup API")
 
-_SETUP_API_TOKEN = os.environ.get("SETUP_API_TOKEN", "")
-
 _CORS_ORIGINS = [
     origin.strip()
     for origin in os.environ.get("SETUP_CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
@@ -48,9 +46,10 @@ _bearer = HTTPBearer(auto_error=False)
 async def _require_token(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> None:
-    if not _SETUP_API_TOKEN:
+    token = os.environ.get("SETUP_API_TOKEN", "")
+    if not token:
         return
-    if not creds or not secrets.compare_digest(creds.credentials, _SETUP_API_TOKEN):
+    if not creds or not secrets.compare_digest(creds.credentials, token):
         raise HTTPException(401, "Invalid or missing API token")
 
 # Shared state — populated by the LMS on startup, or by standalone mode

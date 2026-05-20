@@ -12,3 +12,4 @@ mediamtx
 yolov8n.pt
 assets/
 supabase/snippets/
+.vercel
