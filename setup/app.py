@@ -12,11 +12,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 import subprocess
 import time
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from setup.discovery import discover_onvif_cameras
@@ -25,12 +27,31 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Melo Setup API")
 
+_SETUP_API_TOKEN = os.environ.get("SETUP_API_TOKEN", "")
+
+_CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("SETUP_CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+async def _require_token(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> None:
+    if not _SETUP_API_TOKEN:
+        return
+    if not creds or not secrets.compare_digest(creds.credentials, _SETUP_API_TOKEN):
+        raise HTTPException(401, "Invalid or missing API token")
 
 # Shared state — populated by the LMS on startup, or by standalone mode
 _state: dict = {}
@@ -118,7 +139,7 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/api/discover", response_model=DiscoverResponse)
+@app.post("/api/discover", response_model=DiscoverResponse, dependencies=[Depends(_require_token)])
 async def discover_cameras(timeout: float = 3.0):
     """Run WS-Discovery probe on the local network."""
     cameras = await asyncio.to_thread(discover_onvif_cameras, timeout)
@@ -135,7 +156,7 @@ async def discover_cameras(timeout: float = 3.0):
     )
 
 
-@app.post("/api/test", response_model=TestCameraResponse)
+@app.post("/api/test", response_model=TestCameraResponse, dependencies=[Depends(_require_token)])
 async def test_camera(req: TestCameraRequest):
     """Test ONVIF connection — GetProfiles + GetStreamUri."""
     try:
@@ -150,7 +171,7 @@ async def test_camera(req: TestCameraRequest):
         return TestCameraResponse(success=False, error=str(exc))
 
 
-@app.post("/api/test-rtsp", response_model=TestCameraResponse)
+@app.post("/api/test-rtsp", response_model=TestCameraResponse, dependencies=[Depends(_require_token)])
 async def test_rtsp(req: TestRtspRequest):
     """Probe an RTSP URL directly with ffprobe."""
     import subprocess
@@ -187,7 +208,7 @@ async def test_rtsp(req: TestRtspRequest):
         return TestCameraResponse(success=False, error=str(exc))
 
 
-@app.post("/api/cameras", response_model=SaveCameraResponse)
+@app.post("/api/cameras", response_model=SaveCameraResponse, dependencies=[Depends(_require_token)])
 async def save_camera(req: SaveCameraRequest):
     """Save a camera to Supabase: creates a stream + shelter_camera record."""
     client = _get_supabase()
@@ -279,7 +300,7 @@ async def save_camera(req: SaveCameraRequest):
     return SaveCameraResponse(camera_id=camera["id"], stream_id=stream_id)
 
 
-@app.delete("/api/cameras")
+@app.delete("/api/cameras", dependencies=[Depends(_require_token)])
 async def delete_camera(req: DeleteCameraRequest):
     """Delete a camera and stop its pipeline (no LMS restart needed)."""
     client = _get_supabase()
@@ -297,7 +318,7 @@ async def delete_camera(req: DeleteCameraRequest):
     return {"status": "ok"}
 
 
-@app.post("/api/shutdown", response_model=ShutdownResponse)
+@app.post("/api/shutdown", response_model=ShutdownResponse, dependencies=[Depends(_require_token)])
 async def shutdown():
     """Gracefully stop all pipelines, save logs, and power off."""
     pipeline_mgr = _state.get("pipeline_manager")

@@ -75,6 +75,8 @@ class HLSPipeline:
                 self._process.kill()
         if self._watchdog_thread:
             self._watchdog_thread.join(timeout=10)
+        if self._stderr_thread:
+            self._stderr_thread.join(timeout=5)
         logger.info("HLS pipeline stopped for stream %s", self._stream_id)
 
     def is_alive(self) -> bool:
@@ -141,6 +143,8 @@ class HLSPipeline:
         return cmd
 
     def _spawn(self) -> None:
+        if self._stderr_thread and self._stderr_thread.is_alive():
+            self._stderr_thread.join(timeout=3)
         cmd = self._build_ffmpeg_cmd()
         self._process = subprocess.Popen(
             cmd,
@@ -184,10 +188,7 @@ class HLSPipeline:
                 stream_id=self._stream_id,
                 attempt_fn=self._try_restart,
                 stop_fn=self._stop_event.is_set,
-                on_failure=lambda: logger.critical(
-                    "PERMANENT FAILURE: stream %s exhausted all reconnect attempts. "
-                    "Manual intervention required.", self._stream_id
-                ),
+                stop_event=self._stop_event,
             )
 
     def _wait_or_detect_stall(self) -> None:

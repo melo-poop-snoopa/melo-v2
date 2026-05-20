@@ -100,7 +100,7 @@ class R2Uploader:
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=10)
-        self._upload_pool.shutdown(wait=False)
+        self._upload_pool.shutdown(wait=True, cancel_futures=True)
         logger.info("R2 uploader stopped for stream %s", self._stream_id)
 
     @property
@@ -334,6 +334,10 @@ class R2Uploader:
         if stale_names:
             self._pending_r2_deletes.extend(stale_names)
             self._uploaded -= stale_names
+
+        stale_lost = self._lost_segments - current_files
+        if stale_lost:
+            self._lost_segments -= stale_lost
 
         self._flush_r2_deletes()
 

@@ -18,7 +18,7 @@ _DETECT_FPS = 2
 _FRAME_INTERVAL = 1.0 / _DETECT_FPS
 _ACTIVATION_FRAMES = 3                  # ~1.5s of sustained detection before activating
 _DEACTIVATION_FRAMES = _DETECT_FPS * 25  # counter ceiling; clears after this many missed frames
-_CONTAINER_RESTART_INTERVAL = 1800  # reopen RTSP every 30min to flush FFmpeg internal buffers
+_CONTAINER_RESTART_INTERVAL = 300  # reopen RTSP every 5min to flush buffers and break decode hangs
 _GC_EVERY_N_FRAMES = 500
 
 
@@ -38,6 +38,7 @@ class PrivacyFilter:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._model = None
+        self._debug_frames_saved = False
 
     def start(self) -> None:
         self._model = _load_model()
@@ -110,7 +111,7 @@ class PrivacyFilter:
                 frame_count += 1
                 img = frame.to_ndarray(format="rgb24")
 
-                if frame_count <= 3:
+                if frame_count <= 3 and not self._debug_frames_saved:
                     logger.info(
                         "Stream %s: frame #%d shape=%s mean_pixel=%.1f",
                         self._stream_id, frame_count, img.shape, img.mean(),
@@ -122,6 +123,8 @@ class PrivacyFilter:
                         logger.info("Saved debug frame to %s", debug_path)
                     except Exception:
                         logger.exception("Failed to save debug frame")
+                    if frame_count == 3:
+                        self._debug_frames_saved = True
 
                 results = self._model(img, classes=[0], conf=0.10, verbose=False)
 

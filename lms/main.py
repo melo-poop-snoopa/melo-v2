@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import logging.handlers
 import os
 import resource
 import signal
@@ -98,7 +99,9 @@ def main() -> None:
         log_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
         session_log_path = str(log_dir / f"session_{ts}.log")
-        file_handler = logging.FileHandler(session_log_path)
+        file_handler = logging.handlers.RotatingFileHandler(
+            session_log_path, maxBytes=50 * 1024 * 1024, backupCount=3,
+        )
         file_handler.setFormatter(logging.Formatter(log_format))
         logging.getLogger().addHandler(file_handler)
         logger.info("Session log: %s", session_log_path)
@@ -173,12 +176,30 @@ def main() -> None:
             return rusage.ru_maxrss / 1024
         return rusage.ru_maxrss / (1024 * 1024)
 
+    def _sd_notify(state: str) -> None:
+        """Send a notification to systemd (no-op if not running under systemd)."""
+        addr = os.environ.get("NOTIFY_SOCKET")
+        if not addr:
+            return
+        import socket
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            if addr.startswith("@"):
+                addr = "\0" + addr[1:]
+            sock.connect(addr)
+            sock.sendall(state.encode())
+        finally:
+            sock.close()
+
+    _sd_notify("READY=1")
+
     def _process_heartbeat():
         while not stop.is_set():
-            stop.wait(300)
+            stop.wait(60)
             if stop.is_set():
                 break
             try:
+                _sd_notify("WATCHDOG=1")
                 rss_mb = _get_current_rss_mb()
                 logger.info(
                     "[process] pid=%d rss_mb=%.1f threads=%d uptime_min=%.0f",
