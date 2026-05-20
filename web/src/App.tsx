@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { useAuthStore } from "@/store/auth-store"
 import { AuthGuard } from "@/components/admin/AuthGuard"
 import { AdminLayout } from "@/components/admin/AdminLayout"
+import { SiteGate } from "@/components/SiteGate"
 import Landing from "@/pages/Landing"
 import ShelterPage from "@/pages/ShelterPage"
 import LoginPage from "@/pages/admin/LoginPage"
@@ -46,8 +47,10 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppRoutes />
-    </BrowserRouter>
+    <SiteGate>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </SiteGate>
   )
 }
