@@ -24,7 +24,7 @@ class Config:
     shelter_id: str = ""
 
     # HLS
-    hls_segment_duration: int = 1
+    hls_segment_duration: int = 6
     hls_playlist_size: int = 8
     hls_output_dir: Path = field(default_factory=lambda: Path("./segments"))
     hls_video_codec: str = "copy"
@@ -82,7 +82,7 @@ def load_config() -> Config:
         r2_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
         r2_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
         shelter_id=os.environ["SHELTER_ID"],
-        hls_segment_duration=int(os.environ.get("HLS_SEGMENT_DURATION", "1")),
+        hls_segment_duration=int(os.environ.get("HLS_SEGMENT_DURATION", "6")),
         hls_playlist_size=int(os.environ.get("HLS_PLAYLIST_SIZE", "8")),
         hls_output_dir=Path(os.environ.get("HLS_OUTPUT_DIR", "./segments")),
         hls_video_codec=os.environ.get("HLS_VIDEO_CODEC", "copy"),
