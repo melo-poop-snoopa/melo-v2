@@ -6,7 +6,11 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from lms.heartbeat_manager import HeartbeatManager, _UPLOAD_STALE_THRESHOLD
+from lms.heartbeat_manager import (
+    HeartbeatManager,
+    _OFFLINE_GRACE_TICKS,
+    _UPLOAD_STALE_THRESHOLD,
+)
 
 
 def _make_pipeline(alive: bool) -> MagicMock:
@@ -18,6 +22,7 @@ def _make_pipeline(alive: bool) -> MagicMock:
 def _make_uploader(last_upload_offset: float) -> MagicMock:
     u = MagicMock()
     u.last_upload_time = time.time() - last_upload_offset
+    u.upload_count = 2
     return u
 
 
@@ -46,7 +51,8 @@ def test_offline_when_pipeline_dead():
     pipeline = _make_pipeline(alive=False)
     uploader = _make_uploader(last_upload_offset=5)
 
-    hm._tick("stream-1", pipeline, uploader)
+    for _ in range(_OFFLINE_GRACE_TICKS):
+        hm._tick("stream-1", pipeline, uploader)
 
     db.set_stream_status.assert_called_once_with("stream-1", "offline")
     db.update_heartbeat.assert_not_called()
@@ -61,7 +67,8 @@ def test_offline_when_upload_stale():
     pipeline = _make_pipeline(alive=True)
     uploader = _make_uploader(last_upload_offset=_UPLOAD_STALE_THRESHOLD + 1)
 
-    hm._tick("stream-1", pipeline, uploader)
+    for _ in range(_OFFLINE_GRACE_TICKS):
+        hm._tick("stream-1", pipeline, uploader)
 
     db.set_stream_status.assert_called_once_with("stream-1", "offline")
     db.update_heartbeat.assert_not_called()
@@ -76,9 +83,39 @@ def test_offline_when_both_unhealthy():
     pipeline = _make_pipeline(alive=False)
     uploader = _make_uploader(last_upload_offset=_UPLOAD_STALE_THRESHOLD + 10)
 
-    hm._tick("stream-1", pipeline, uploader)
+    for _ in range(_OFFLINE_GRACE_TICKS):
+        hm._tick("stream-1", pipeline, uploader)
 
     db.set_stream_status.assert_called_once_with("stream-1", "offline")
+
+
+def test_does_not_flip_offline_on_first_unhealthy_tick():
+    db = MagicMock()
+    hm = HeartbeatManager(db, interval=999)
+
+    pipeline = _make_pipeline(alive=False)
+    uploader = _make_uploader(last_upload_offset=5)
+
+    hm._tick("stream-1", pipeline, uploader)
+
+    db.set_stream_status.assert_not_called()
+    db.update_heartbeat.assert_not_called()
+
+
+def test_healthy_tick_resets_unhealthy_counter():
+    db = MagicMock()
+    hm = HeartbeatManager(db, interval=999)
+
+    stale_uploader = _make_uploader(last_upload_offset=_UPLOAD_STALE_THRESHOLD + 1)
+    healthy_uploader = _make_uploader(last_upload_offset=5)
+    pipeline = _make_pipeline(alive=True)
+
+    hm._tick("stream-1", pipeline, stale_uploader)
+    hm._tick("stream-1", pipeline, healthy_uploader)
+    hm._tick("stream-1", pipeline, stale_uploader)
+
+    db.set_stream_status.assert_not_called()
+    db.update_heartbeat.assert_called_once_with("stream-1")
 
 
 # ── multiple streams ticked independently ────────────────────────────────────
@@ -90,10 +127,11 @@ def test_multiple_streams_ticked_independently():
     hm.register("s-live", _make_pipeline(alive=True), _make_uploader(5))
     hm.register("s-dead", _make_pipeline(alive=False), _make_uploader(5))
 
-    for sid, (pl, up) in list(hm._streams.items()):
-        hm._tick(sid, pl, up)
+    for _ in range(_OFFLINE_GRACE_TICKS):
+        for sid, (pl, up) in list(hm._streams.items()):
+            hm._tick(sid, pl, up)
 
-    db.update_heartbeat.assert_called_once_with("s-live")
+    assert db.update_heartbeat.call_count == _OFFLINE_GRACE_TICKS
     db.set_stream_status.assert_called_once_with("s-dead", "offline")
 
 

@@ -23,18 +23,18 @@ export function StreamPlayer({ stream, className }: StreamPlayerProps) {
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
-        liveSyncDurationCount: 2,
-        liveMaxLatencyDurationCount: 4,
-        maxLiveSyncPlaybackRate: 1.5,
+        lowLatencyMode: false,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 10,
+        maxLiveSyncPlaybackRate: 1.2,
         liveDurationInfinity: true,
         backBufferLength: 0,
-        manifestLoadingMaxRetry: 6,
+        manifestLoadingMaxRetry: 10,
         manifestLoadingRetryDelay: 1000,
-        levelLoadingMaxRetry: 6,
+        levelLoadingMaxRetry: 10,
         levelLoadingRetryDelay: 1000,
-        fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 500,
+        fragLoadingMaxRetry: 10,
+        fragLoadingRetryDelay: 1000,
       })
       hlsRef.current = hls
       hls.loadSource(stream.hls_url)

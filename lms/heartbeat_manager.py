@@ -3,7 +3,8 @@ HeartbeatManager: writes stream liveness to Supabase every N seconds.
 
 Only marks a stream live when both the HLS pipeline process is running AND
 the R2 uploader successfully pushed a segment within the last 30 seconds.
-If either check fails, the stream is set offline immediately.
+If either check fails briefly, the manager waits for a few consecutive misses
+before declaring the stream offline to avoid visible flapping.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 _UPLOAD_STALE_THRESHOLD = 30  # seconds
 _MIN_SEGMENTS_FOR_LIVE = 2
+_OFFLINE_GRACE_TICKS = 3
 
 
 class HeartbeatManager:
@@ -34,6 +36,7 @@ class HeartbeatManager:
         self._thread: threading.Thread | None = None
         self._tick_count: int = 0
         self._last_status: dict[str, bool] = {}
+        self._unhealthy_ticks: dict[str, int] = {}
         self._start_time: float = time.time()
         self._summary_interval_ticks: int = max(1, 300 // interval)
 
@@ -73,7 +76,7 @@ class HeartbeatManager:
         stream_id: str,
         pipeline: HLSPipeline,
         uploader: R2Uploader,
-        privacy_filter: PrivacyFilter | None,
+        privacy_filter: PrivacyFilter | None = None,
     ) -> None:
         alive = pipeline.is_alive()
         recent_upload = (time.time() - uploader.last_upload_time) < _UPLOAD_STALE_THRESHOLD
@@ -92,14 +95,19 @@ class HeartbeatManager:
         self._last_status[stream_id] = healthy
 
         if healthy:
+            self._unhealthy_ticks[stream_id] = 0
             privacy_active = bool(privacy_filter and privacy_filter.is_human_detected())
             self._db.update_heartbeat(stream_id, privacy_active=privacy_active)
         else:
+            unhealthy_ticks = self._unhealthy_ticks.get(stream_id, 0) + 1
+            self._unhealthy_ticks[stream_id] = unhealthy_ticks
             logger.warning(
-                "Stream %s unhealthy (alive=%s recent_upload=%s segments=%d) → offline",
+                "Stream %s unhealthy (alive=%s recent_upload=%s segments=%d tick=%d/%d)",
                 stream_id, alive, recent_upload, uploader.upload_count,
+                unhealthy_ticks, _OFFLINE_GRACE_TICKS,
             )
-            self._db.set_stream_status(stream_id, "offline")
+            if unhealthy_ticks >= _OFFLINE_GRACE_TICKS:
+                self._db.set_stream_status(stream_id, "offline")
 
         self._tick_count += 1
         if self._tick_count % self._summary_interval_ticks == 0:

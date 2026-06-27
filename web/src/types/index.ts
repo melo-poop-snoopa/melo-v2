@@ -49,7 +49,7 @@ export const AGE_BRACKET_COLORS: Record<Cat["age_bracket"], string> = {
   senior: "bg-peach-100 text-peach-600",
 }
 
-export const HEARTBEAT_STALE_MS = 45_000
+export const HEARTBEAT_STALE_MS = 120_000
 
 export interface ShelterCamera {
   id: string

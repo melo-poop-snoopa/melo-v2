@@ -134,6 +134,7 @@ class PipelineManager:
                 r2_public_base=cfg.r2_public_base,
                 privacy_filter=privacy_filter,
                 interval=cfg.thumbnail_interval,
+                segment_dir=output_dir,
             )
             thumb.start()
 

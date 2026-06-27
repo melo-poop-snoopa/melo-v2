@@ -1,5 +1,5 @@
 """
-ThumbnailCapture: decodes one frame from an RTSP sub-stream every N seconds,
+ThumbnailCapture: decodes one frame from recent local HLS segments every N seconds,
 uploads it as a JPEG to R2, and updates streams.thumbnail_url in Supabase.
 
 Skips capture when the privacy filter reports a human in frame — retaining
@@ -10,9 +10,7 @@ from __future__ import annotations
 import io
 import logging
 import threading
-import time
-
-import boto3
+from pathlib import Path
 
 from lms.database import MeloDB
 from lms.privacy_filter import PrivacyFilter
@@ -33,6 +31,7 @@ class ThumbnailCapture:
         r2_public_base: str,
         privacy_filter: PrivacyFilter | None = None,
         interval: int = 30,
+        segment_dir: Path | None = None,
     ) -> None:
         self._stream_id = stream_id
         self._rtsp_url = rtsp_url
@@ -43,6 +42,7 @@ class ThumbnailCapture:
         self._public_url = f"{r2_public_base.rstrip('/')}/thumbnails/{stream_id}/thumb.jpg"
         self._privacy_filter = privacy_filter
         self._interval = interval
+        self._segment_dir = segment_dir
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -73,21 +73,13 @@ class ThumbnailCapture:
             self._stop_event.wait(self._interval)
 
     def _capture_and_upload(self) -> None:
-        import av
-
-        container = av.open(
-            self._rtsp_url,
-            options={"rtsp_transport": "tcp", "stimeout": "5000000"},
-        )
-        try:
-            for frame in container.decode(video=0):
-                img = frame.to_image()
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=_JPEG_QUALITY)
-                jpeg_bytes = buf.getvalue()
-                break
-        finally:
-            container.close()
+        jpeg_bytes = self._capture_from_segments()
+        if jpeg_bytes is None:
+            logger.debug(
+                "Stream %s: skipping thumbnail capture (no local HLS segment ready)",
+                self._stream_id,
+            )
+            return
 
         self._s3.put_object(
             Bucket=self._bucket,
@@ -98,3 +90,44 @@ class ThumbnailCapture:
 
         self._db.update_thumbnail_url(self._stream_id, self._public_url)
         logger.debug("Thumbnail uploaded for stream %s (%d bytes)", self._stream_id, len(jpeg_bytes))
+
+    def _capture_from_segments(self) -> bytes | None:
+        if not self._segment_dir or not self._segment_dir.exists():
+            return None
+
+        candidates: list[tuple[float, Path]] = []
+        for path in self._segment_dir.glob("*.ts"):
+            try:
+                candidates.append((path.stat().st_mtime, path))
+            except FileNotFoundError:
+                continue
+        candidates.sort(key=lambda item: item[0], reverse=True)
+
+        for _, path in candidates[:3]:
+            try:
+                return self._capture_jpeg_from_source(path)
+            except FileNotFoundError:
+                continue
+            except Exception:
+                logger.warning(
+                    "Stream %s: failed to decode thumbnail from %s",
+                    self._stream_id,
+                    path.name,
+                    exc_info=True,
+                )
+        return None
+
+    @staticmethod
+    def _capture_jpeg_from_source(source: Path) -> bytes:
+        import av
+
+        container = av.open(str(source))
+        try:
+            for frame in container.decode(video=0):
+                img = frame.to_image()
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=_JPEG_QUALITY)
+                return buf.getvalue()
+        finally:
+            container.close()
+        raise RuntimeError(f"No decodable video frame found in {source}")
