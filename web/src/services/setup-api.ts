@@ -9,6 +9,63 @@
 import { supabase } from "@/services/supabase"
 
 let _cachedBaseUrl: string | null = null
+const SETUP_API_TOKEN_KEY = "melo.setupApiToken"
+
+function getTokenStorageKey(shelterId: string): string {
+  return `${SETUP_API_TOKEN_KEY}:${shelterId}`
+}
+
+function getEnvSetupApiToken(): string {
+  return (import.meta.env.VITE_SETUP_API_TOKEN as string | undefined)?.trim() ?? ""
+}
+
+export function getSetupApiToken(shelterId: string): string {
+  if (typeof window === "undefined") return getEnvSetupApiToken()
+  return window.localStorage.getItem(getTokenStorageKey(shelterId))?.trim() || getEnvSetupApiToken()
+}
+
+export function setSetupApiToken(shelterId: string, token: string) {
+  if (typeof window === "undefined") return
+  const trimmed = token.trim()
+  const key = getTokenStorageKey(shelterId)
+  if (trimmed) {
+    window.localStorage.setItem(key, trimmed)
+  } else {
+    window.localStorage.removeItem(key)
+  }
+}
+
+async function getErrorMessage(res: Response, fallback: string): Promise<string> {
+  let detail = ""
+  try {
+    const json = await res.json()
+    if (typeof json?.detail === "string") detail = json.detail
+    else if (typeof json?.error === "string") detail = json.error
+  } catch {
+    try {
+      const text = (await res.text()).trim()
+      if (text) detail = text
+    } catch {
+      // Ignore parse failures and keep the fallback message.
+    }
+  }
+
+  const prefix = `${fallback}: ${res.status}`
+  if (!detail) return prefix
+  return `${prefix} (${detail})`
+}
+
+async function setupFetch(
+  shelterId: string,
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const base = await getBaseUrl(shelterId)
+  const headers = new Headers(init.headers)
+  const token = getSetupApiToken(shelterId)
+  if (token) headers.set("Authorization", `Bearer ${token}`)
+  return fetch(`${base}${path}`, { ...init, headers })
+}
 
 async function getBaseUrl(shelterId: string): Promise<string> {
   if (_cachedBaseUrl) return _cachedBaseUrl
@@ -51,8 +108,7 @@ export interface SaveCameraResponse {
 
 export async function checkSetupHealth(shelterId: string): Promise<boolean> {
   try {
-    const base = await getBaseUrl(shelterId)
-    const res = await fetch(`${base}/api/health`, {
+    const res = await setupFetch(shelterId, "/api/health", {
       signal: AbortSignal.timeout(3000),
     })
     return res.ok
@@ -63,9 +119,8 @@ export async function checkSetupHealth(shelterId: string): Promise<boolean> {
 }
 
 export async function discoverCameras(shelterId: string): Promise<DiscoverResponse> {
-  const base = await getBaseUrl(shelterId)
-  const res = await fetch(`${base}/api/discover`, { method: "POST" })
-  if (!res.ok) throw new Error(`Discovery failed: ${res.status}`)
+  const res = await setupFetch(shelterId, "/api/discover", { method: "POST" })
+  if (!res.ok) throw new Error(await getErrorMessage(res, "Discovery failed"))
   return res.json()
 }
 
@@ -76,13 +131,12 @@ export async function testCamera(
   username: string,
   password: string,
 ): Promise<TestCameraResponse> {
-  const base = await getBaseUrl(shelterId)
-  const res = await fetch(`${base}/api/test`, {
+  const res = await setupFetch(shelterId, "/api/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ host, port, username, password }),
   })
-  if (!res.ok) throw new Error(`Test failed: ${res.status}`)
+  if (!res.ok) throw new Error(await getErrorMessage(res, "Test failed"))
   return res.json()
 }
 
@@ -90,13 +144,12 @@ export async function testRtspUrl(
   shelterId: string,
   rtspUrl: string,
 ): Promise<TestCameraResponse> {
-  const base = await getBaseUrl(shelterId)
-  const res = await fetch(`${base}/api/test-rtsp`, {
+  const res = await setupFetch(shelterId, "/api/test-rtsp", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rtsp_url: rtspUrl }),
   })
-  if (!res.ok) throw new Error(`RTSP test failed: ${res.status}`)
+  if (!res.ok) throw new Error(await getErrorMessage(res, "RTSP test failed"))
   return res.json()
 }
 
@@ -113,13 +166,12 @@ export async function saveCamera(
     device_uuid?: string
   },
 ): Promise<SaveCameraResponse> {
-  const base = await getBaseUrl(shelterId)
-  const res = await fetch(`${base}/api/cameras`, {
+  const res = await setupFetch(shelterId, "/api/cameras", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
   })
-  if (!res.ok) throw new Error(`Save failed: ${res.status}`)
+  if (!res.ok) throw new Error(await getErrorMessage(res, "Save failed"))
   return res.json()
 }
 
@@ -129,12 +181,11 @@ export interface ShutdownResponse {
 }
 
 export async function shutdownLms(shelterId: string): Promise<ShutdownResponse> {
-  const base = await getBaseUrl(shelterId)
-  const res = await fetch(`${base}/api/shutdown`, {
+  const res = await setupFetch(shelterId, "/api/shutdown", {
     method: "POST",
     signal: AbortSignal.timeout(30000),
   })
-  if (!res.ok) throw new Error(`Shutdown failed: ${res.status}`)
+  if (!res.ok) throw new Error(await getErrorMessage(res, "Shutdown failed"))
   const data = await res.json()
   clearLmsCache()
   return data
@@ -145,11 +196,10 @@ export async function deleteCamera(
   cameraId: string,
   streamId: string | null,
 ): Promise<void> {
-  const base = await getBaseUrl(shelterId)
-  const res = await fetch(`${base}/api/cameras`, {
+  const res = await setupFetch(shelterId, "/api/cameras", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ camera_id: cameraId, stream_id: streamId }),
   })
-  if (!res.ok) throw new Error(`Delete failed: ${res.status}`)
+  if (!res.ok) throw new Error(await getErrorMessage(res, "Delete failed"))
 }

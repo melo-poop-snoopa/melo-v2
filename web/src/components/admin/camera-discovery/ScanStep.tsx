@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ArrowLeft, Camera, Link, Loader2, Plus, Radar, WifiOff } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { discoverCameras } from "@/services/setup-api"
+import { discoverCameras, getSetupApiToken, setSetupApiToken } from "@/services/setup-api"
 import type { DiscoveredCamera } from "@/types"
 
 interface ScanStepProps {
@@ -25,11 +25,22 @@ export function ScanStep({ shelterId, onComplete, onClose }: ScanStepProps) {
   const [manualPort, setManualPort] = useState("80")
   const [rtspUrl, setRtspUrl] = useState("")
   const [rtspStreamName, setRtspStreamName] = useState("")
+  const [setupToken, setSetupTokenState] = useState(() => getSetupApiToken(shelterId))
+  const [scanError, setScanError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSetupTokenState(getSetupApiToken(shelterId))
+  }, [shelterId])
+
+  useEffect(() => {
+    setSetupApiToken(shelterId, setupToken)
+  }, [setupToken, shelterId])
 
   useEffect(() => {
     if (mode !== "scanning") return
     let cancelled = false
     setDiscovered(null)
+    setScanError(null)
 
     discoverCameras(shelterId)
       .then(({ cameras }) => {
@@ -37,8 +48,9 @@ export function ScanStep({ shelterId, onComplete, onClose }: ScanStepProps) {
         setDiscovered(cameras)
         setSelectedIndices(new Set(cameras.map((_, i) => i)))
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return
+        setScanError(err instanceof Error ? err.message : "Discovery failed")
         setDiscovered([])
         setSelectedIndices(new Set())
       })
@@ -136,6 +148,23 @@ export function ScanStep({ shelterId, onComplete, onClose }: ScanStepProps) {
           </div>
         </button>
 
+        <div className="rounded-lg bg-white/5 p-4">
+          <Label htmlFor="setup-api-token" className="text-xs text-muted-foreground">
+            Setup API Token (optional)
+          </Label>
+          <Input
+            id="setup-api-token"
+            type="password"
+            value={setupToken}
+            onChange={(e) => setSetupTokenState(e.target.value)}
+            placeholder="Required only if SETUP_API_TOKEN is set on the Pi"
+            className="mt-2"
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            Saved in this browser for this shelter. Leave blank if the Pi setup API is unsecured.
+          </p>
+        </div>
+
         <Button variant="outline" className="w-full" onClick={onClose}>
           Cancel
         </Button>
@@ -229,14 +258,31 @@ export function ScanStep({ shelterId, onComplete, onClose }: ScanStepProps) {
       ) : discovered.length === 0 ? (
         <div className="flex flex-col gap-4">
           <div className="flex flex-col items-center gap-3 rounded-lg bg-white/5 p-6 text-center">
-            <WifiOff className="h-8 w-8 text-muted-foreground" />
+            <WifiOff className={cn("h-8 w-8", scanError ? "text-amber-500" : "text-muted-foreground")} />
             <div>
-              <p className="text-sm text-foreground">No cameras detected</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Make sure the cameras are powered on and connected to this network.
+              <p className="text-sm text-foreground">
+                {scanError ? "Camera discovery failed" : "No cameras detected"}
               </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {scanError
+                  ? scanError
+                  : "Make sure the cameras are powered on and connected to this network."}
+              </p>
+              {scanError && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Check the Pi's `SETUP_API_TOKEN`, `SETUP_CORS_ORIGINS`, and `lms_url`, then try again.
+                </p>
+              )}
             </div>
           </div>
+          {scanError && (
+            <Button
+              className="w-full bg-melo-500 text-white hover:bg-melo-600"
+              onClick={() => setMode("scanning")}
+            >
+              Try again
+            </Button>
+          )}
           <Button
             className="w-full bg-melo-500 text-white hover:bg-melo-600"
             onClick={() => setMode("manual")}

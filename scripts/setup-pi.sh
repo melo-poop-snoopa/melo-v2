@@ -73,6 +73,10 @@ SHELTER_ID=
 LOCAL_DEV=false
 LOG_LEVEL=INFO
 PRIVACY_FILTER_ENABLED=true
+SETUP_API_TOKEN=
+# Comma-separated list of allowed dashboard origins, e.g.:
+# SETUP_CORS_ORIGINS=https://melo.example.com,http://localhost:5173
+SETUP_CORS_ORIGINS=
 ENV
   chown "$MELO_USER:$MELO_USER" "$MELO_DIR/.env"
   echo "==> Edit $MELO_DIR/.env before starting the service"
